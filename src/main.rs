@@ -1,5 +1,19 @@
-use anyhow::{anyhow, Result};
-use std::{env, iter::Peekable, process::ExitCode, vec::IntoIter};
+use anyhow::{anyhow, Error, Result};
+use std::{env, iter::Peekable, mem::take, process::ExitCode, sync::OnceLock, vec::IntoIter};
+
+static GLOBAL_INPUT: OnceLock<String> = OnceLock::new();
+
+fn current_input() -> &'static str {
+    GLOBAL_INPUT.get().expect("GlobalInput not initialized")
+}
+
+fn new_error_at(loc: usize, message: &str) -> Error {
+    anyhow!("{}\n{}^ {}", current_input(), " ".repeat(loc), message)
+}
+
+fn new_error_tok(tok: &Token, message: &str) -> Error {
+    new_error_at(tok.pos, message)
+}
 
 #[derive(Debug, PartialEq)]
 enum TokenKind {
@@ -9,18 +23,18 @@ enum TokenKind {
 }
 
 #[derive(Debug)]
-struct Token<'a> {
+struct Token {
     kind: TokenKind,
-    #[allow(dead_code)]
     pos: usize,
-    lexeme: &'a str,
+    lexeme: &'static str,
 }
 
-fn new_token(kind: TokenKind, pos: usize, lexeme: &str) -> Token {
+fn new_token(kind: TokenKind, pos: usize, lexeme: &'static str) -> Token {
     Token { kind, pos, lexeme }
 }
 
-fn tokenize(mut input: &str) -> Result<Peekable<IntoIter<Token>>> {
+fn tokenize() -> Result<Peekable<IntoIter<Token>>> {
+    let mut input = current_input();
     let mut tokens = Vec::new();
     let mut pos = 0;
 
@@ -39,7 +53,10 @@ fn tokenize(mut input: &str) -> Result<Peekable<IntoIter<Token>>> {
                 .unwrap_or(input.len());
             let (lexeme, rest) = input.split_at(end);
             let Ok(num) = lexeme.parse::<isize>() else {
-                return Err(anyhow!("{lexeme}: invalid number of inputs"));
+                return Err(new_error_at(
+                    pos,
+                    &format!("{lexeme}: invalid number of inputs"),
+                ));
             };
             tokens.push(new_token(TokenKind::Num(num), pos, lexeme));
             pos += end;
@@ -55,7 +72,7 @@ fn tokenize(mut input: &str) -> Result<Peekable<IntoIter<Token>>> {
             continue;
         }
 
-        return Err(anyhow!("invalid token"));
+        return Err(new_error_at(pos, "invalid token"));
     }
 
     tokens.push(new_token(TokenKind::Eof, pos, ""));
@@ -65,7 +82,7 @@ fn tokenize(mut input: &str) -> Result<Peekable<IntoIter<Token>>> {
 
 fn get_number(token: &Token) -> Result<isize> {
     let TokenKind::Num(num) = token.kind else {
-        return Err(anyhow!("expected a number"));
+        return Err(new_error_tok(token, "expected a number"));
     };
     Ok(num)
 }
@@ -79,7 +96,7 @@ fn skip(tokens: &mut Peekable<IntoIter<Token>>, op: &str) -> Result<()> {
         return Err(anyhow!("expected token"));
     };
     if !equal(tok, op) {
-        return Err(anyhow!("expected '{op}'"));
+        return Err(new_error_tok(tok, &format!("expected '{op}'")));
     }
     tokens.next();
     Ok(())
@@ -94,14 +111,18 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let mut args: Vec<String> = env::args().collect();
 
-    let [_, arg] = args.as_slice() else {
+    let [_, arg] = args.as_mut_slice() else {
         let name = env::args().next().unwrap_or_default();
         return Err(anyhow!("{name}: invalid number of arguments"));
     };
 
-    let mut tokens = tokenize(arg)?;
+    GLOBAL_INPUT
+        .set(take(arg))
+        .expect("failed to initialize GlobalInput");
+
+    let mut tokens = tokenize()?;
 
     let Some(tok) = tokens.next() else {
         return Err(anyhow!("expected a token"));
