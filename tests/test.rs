@@ -35,6 +35,7 @@ fn test_compiler() -> Result<()> {
     assert_eq!(run("0")?, Some(0));
     assert_eq!(run("42")?, Some(42));
     assert_eq!(run("5+20-4")?, Some(21));
+    assert_eq!(run(" 12 + 34 - 5 ")?, Some(41));
 
     Ok(())
 }
