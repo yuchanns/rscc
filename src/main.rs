@@ -25,6 +25,8 @@ fn new_error_tok(tok: &Token, message: &str) -> Error {
     new_error_at(tok.pos, message)
 }
 
+// Tokenizer
+
 #[derive(Debug, PartialEq)]
 enum TokenKind {
     Punct,
@@ -32,6 +34,7 @@ enum TokenKind {
     Eof,
 }
 
+// Token type
 #[derive(Debug)]
 struct Token {
     kind: TokenKind,
@@ -90,15 +93,19 @@ fn tokenize() -> Result<Peekable<IntoIter<Token>>> {
     Ok(tokens.into_iter().peekable())
 }
 
+// Parser
+
 #[derive(Debug, PartialEq)]
 enum NodeKind {
     Add,        // +
     Sub,        // -
     Mul,        // *
     Div,        // /
+    Neg,        // unary -
     Num(isize), // Integer
 }
 
+// AST node type
 #[derive(Debug)]
 struct Node {
     kind: NodeKind,
@@ -114,6 +121,14 @@ fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
     }
 }
 
+fn new_unary(kind: NodeKind, expr: Option<Node>) -> Node {
+    Node {
+        kind,
+        lhs: expr.map(Box::new),
+        rhs: None,
+    }
+}
+
 fn new_num(val: isize) -> Node {
     Node {
         kind: NodeKind::Num(val),
@@ -122,6 +137,7 @@ fn new_num(val: isize) -> Node {
     }
 }
 
+// expr = mul ("+" mul | "-" mul)*
 fn expr(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     let mut node = mul(tokens)?;
     while let Some(tok) = tokens.peek() {
@@ -141,8 +157,9 @@ fn expr(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     Ok(node)
 }
 
+// mul = unary ("*" unary | "/" unary)*
 fn mul(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
-    let mut node = primary(tokens)?;
+    let mut node = unary(tokens)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "*") {
             tokens.next();
@@ -160,6 +177,24 @@ fn mul(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     Ok(node)
 }
 
+// unary = ("+" | "-") unary
+//       | primary
+fn unary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let Some(tok) = tokens.peek() else {
+        return Ok(None);
+    };
+    if equal(tok, "+") {
+        tokens.next();
+        return unary(tokens);
+    }
+    if equal(tok, "-") {
+        tokens.next();
+        return Ok(Some(new_unary(NodeKind::Neg, unary(tokens)?)));
+    }
+    primary(tokens)
+}
+
+// primary = "(" expr ")" | num
 fn primary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     let Some(tok) = tokens.peek() else {
         return Ok(None);
@@ -203,6 +238,10 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     if let NodeKind::Num(num) = node.kind {
         println!("  mov x0, #{num}");
         return Ok(());
+    } else if let NodeKind::Neg = node.kind {
+        gen_expr(node.lhs.as_deref())?;
+        println!("  neg x0, x0");
+        return Ok(());
     }
     gen_expr(node.rhs.as_deref())?;
     push();
@@ -226,10 +265,12 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     Ok(())
 }
 
+// Consumes the current token if it matches `op`
 fn equal(token: &Token, op: &str) -> bool {
     token.lexeme == op
 }
 
+// Ensure that the current token is `op`
 fn skip(tokens: &mut Peekable<IntoIter<Token>>, op: &str) -> Result<()> {
     let Some(tok) = tokens.peek() else {
         return Err(anyhow!("expected token"));
@@ -257,12 +298,11 @@ fn run() -> Result<()> {
         return Err(anyhow!("{name}: invalid number of arguments"));
     };
 
+    // Tokenize and parse
     GLOBAL_INPUT
         .set(take(arg))
         .expect("failed to initialize GlobalInput");
-
     let mut tokens = tokenize()?;
-
     let node = expr(&mut tokens)?;
 
     if let Some(tok) = tokens.next() {
