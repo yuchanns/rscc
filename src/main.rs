@@ -1,5 +1,15 @@
 use anyhow::{anyhow, Error, Result};
-use std::{env, iter::Peekable, mem::take, process::ExitCode, sync::OnceLock, vec::IntoIter};
+use std::{
+    env,
+    iter::Peekable,
+    mem::take,
+    process::ExitCode,
+    sync::{
+        atomic::{AtomicIsize, Ordering::SeqCst},
+        OnceLock,
+    },
+    vec::IntoIter,
+};
 
 static GLOBAL_INPUT: OnceLock<String> = OnceLock::new();
 
@@ -80,11 +90,140 @@ fn tokenize() -> Result<Peekable<IntoIter<Token>>> {
     Ok(tokens.into_iter().peekable())
 }
 
-fn get_number(token: &Token) -> Result<isize> {
-    let TokenKind::Num(num) = token.kind else {
-        return Err(new_error_tok(token, "expected a number"));
+#[derive(Debug, PartialEq)]
+enum NodeKind {
+    Add,        // +
+    Sub,        // -
+    Mul,        // *
+    Div,        // /
+    Num(isize), // Integer
+}
+
+#[derive(Debug)]
+struct Node {
+    kind: NodeKind,
+    lhs: Option<Box<Node>>,
+    rhs: Option<Box<Node>>,
+}
+
+fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
+    Node {
+        kind,
+        lhs: lhs.map(Box::new),
+        rhs: rhs.map(Box::new),
+    }
+}
+
+fn new_num(val: isize) -> Node {
+    Node {
+        kind: NodeKind::Num(val),
+        lhs: None,
+        rhs: None,
+    }
+}
+
+fn expr(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let mut node = mul(tokens)?;
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, "+") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Add, node, mul(tokens)?));
+            continue;
+        }
+        if equal(tok, "-") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Sub, node, mul(tokens)?));
+            continue;
+        }
+        break;
+    }
+
+    Ok(node)
+}
+
+fn mul(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let mut node = primary(tokens)?;
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, "*") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Mul, node, primary(tokens)?));
+            continue;
+        }
+        if equal(tok, "/") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Div, node, primary(tokens)?));
+            continue;
+        }
+        break;
+    }
+
+    Ok(node)
+}
+
+fn primary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let Some(tok) = tokens.peek() else {
+        return Ok(None);
     };
-    Ok(num)
+    if equal(tok, "(") {
+        tokens.next();
+        let node = expr(tokens)?;
+        skip(tokens, ")")?;
+        return Ok(node);
+    } else if let TokenKind::Num(num) = tok.kind {
+        let node = new_num(num);
+        tokens.next();
+        return Ok(Some(node));
+    }
+
+    unreachable!("primary")
+}
+
+// Code generator
+
+static GLOBAL_DEPTH: OnceLock<AtomicIsize> = OnceLock::new();
+
+fn current_depth() -> &'static AtomicIsize {
+    GLOBAL_DEPTH.get_or_init(|| AtomicIsize::new(0))
+}
+
+fn push() {
+    println!("  str x0, [sp, #-16]!");
+    current_depth().fetch_add(1, SeqCst);
+}
+
+fn pop(arg: &str) {
+    println!(" ldr {arg}, [sp], #16");
+    current_depth().fetch_sub(1, SeqCst);
+}
+
+fn gen_expr(node: Option<&Node>) -> Result<()> {
+    let Some(node) = node else {
+        return Ok(());
+    };
+    if let NodeKind::Num(num) = node.kind {
+        println!("  mov x0, #{num}");
+        return Ok(());
+    }
+    gen_expr(node.rhs.as_deref())?;
+    push();
+    gen_expr(node.lhs.as_deref())?;
+    pop("x1");
+    match node.kind {
+        NodeKind::Add => {
+            println!("  add x0, x0, x1");
+        }
+        NodeKind::Sub => {
+            println!("  sub x0, x0, x1");
+        }
+        NodeKind::Mul => {
+            println!("  mul x0, x0, x1");
+        }
+        NodeKind::Div => {
+            println!("  sdiv x0, x0, x1");
+        }
+        _ => unreachable!("gen_expr"),
+    }
+    Ok(())
 }
 
 fn equal(token: &Token, op: &str) -> bool {
@@ -124,8 +263,12 @@ fn run() -> Result<()> {
 
     let mut tokens = tokenize()?;
 
-    let Some(tok) = tokens.next() else {
-        return Err(anyhow!("expected a token"));
+    let node = expr(&mut tokens)?;
+
+    if let Some(tok) = tokens.next() {
+        if tok.kind != TokenKind::Eof {
+            return Err(new_error_tok(&tok, "extra token"));
+        }
     };
 
     #[cfg(not(target_os = "macos"))]
@@ -138,25 +281,9 @@ fn run() -> Result<()> {
         println!("  .global _main");
         println!("_main:");
     }
-    println!("  mov x0, #{}", get_number(&tok)?);
 
-    while let Some(tok) = tokens.peek() {
-        if tok.kind == TokenKind::Eof {
-            break;
-        }
-        if equal(tok, "+") {
-            tokens.next();
-            let Some(tok) = tokens.next() else {
-                return Err(anyhow!("expected a token"));
-            };
-            println!("  add x0, x0, #{}", get_number(&tok)?);
-        }
-        skip(&mut tokens, "-")?;
-        let Some(tok) = tokens.next() else {
-            return Err(anyhow!("expected a token"));
-        };
-        println!("  sub x0, x0, #{}", get_number(&tok)?);
-    }
+    // Traverse the AST to emit assembly
+    gen_expr(node.as_ref())?;
 
     println!("  ret");
 
