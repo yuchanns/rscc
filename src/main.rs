@@ -46,6 +46,16 @@ fn new_token(kind: TokenKind, pos: usize, lexeme: &'static str) -> Token {
     Token { kind, pos, lexeme }
 }
 
+fn read_punct(input: &str) -> Option<usize> {
+    let mut chars = input.chars();
+    match (chars.next(), chars.next()) {
+        (Some(a), Some(b)) if "=!<>".contains(a) && b == '=' => Some(2),
+        (Some(a), _) if a.is_ascii_punctuation() => Some(1),
+        _ => None,
+    }
+}
+
+// Tokenize `current_input` and nreturns new tokens
 fn tokenize() -> Result<Peekable<IntoIter<Token>>> {
     let mut input = current_input();
     let mut tokens = Vec::new();
@@ -78,10 +88,10 @@ fn tokenize() -> Result<Peekable<IntoIter<Token>>> {
         }
 
         // Punctuator
-        if input.starts_with(|c: char| c.is_ascii_punctuation()) {
-            tokens.push(new_token(TokenKind::Punct, pos, &input[..1]));
-            pos += 1;
-            input = &input[1..];
+        if let Some(punct_len) = read_punct(input) {
+            tokens.push(new_token(TokenKind::Punct, pos, &input[..punct_len]));
+            pos += punct_len;
+            input = &input[punct_len..];
             continue;
         }
 
@@ -102,6 +112,10 @@ enum NodeKind {
     Mul,        // *
     Div,        // /
     Neg,        // unary -
+    Eq,         // ==
+    Ne,         // !=
+    Lt,         // <
+    Le,         // <=
     Num(isize), // Integer
 }
 
@@ -137,8 +151,63 @@ fn new_num(val: isize) -> Node {
     }
 }
 
-// expr = mul ("+" mul | "-" mul)*
+// expr = equality
 fn expr(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    equality(tokens)
+}
+
+// equality = relational ("==" relational | "!=" relational)*
+fn equality(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let mut node = relational(tokens)?;
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, "==") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Eq, node, relational(tokens)?));
+            continue;
+        }
+        if equal(tok, "!=") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Ne, node, relational(tokens)?));
+            continue;
+        }
+        break;
+    }
+
+    Ok(node)
+}
+
+// relational = add ("<" add | "<=" add | ">=" add)*
+fn relational(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let mut node = add(tokens)?;
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, "<") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Lt, node, add(tokens)?));
+            continue;
+        }
+        if equal(tok, "<=") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Le, node, add(tokens)?));
+            continue;
+        }
+        if equal(tok, ">") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Lt, add(tokens)?, node));
+            continue;
+        }
+        if equal(tok, ">=") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Le, add(tokens)?, node));
+            continue;
+        }
+        break;
+    }
+
+    Ok(node)
+}
+
+// add = mul ("+" mul | "-" mul)*
+fn add(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     let mut node = mul(tokens)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "+") {
@@ -247,7 +316,7 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     push();
     gen_expr(node.lhs.as_deref())?;
     pop("x1");
-    match node.kind {
+    match &node.kind {
         NodeKind::Add => {
             println!("  add x0, x0, x1");
         }
@@ -259,6 +328,18 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
         }
         NodeKind::Div => {
             println!("  sdiv x0, x0, x1");
+        }
+        kind @ (NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le) => {
+            println!("  cmp x0, x1");
+            if let NodeKind::Eq = kind {
+                println!("  cset w0, eq");
+            } else if let NodeKind::Ne = kind {
+                println!("  cset w0, ne");
+            } else if let NodeKind::Lt = kind {
+                println!("  cset w0, lt");
+            } else {
+                println!("  cset w0, le");
+            }
         }
         _ => unreachable!("gen_expr"),
     }

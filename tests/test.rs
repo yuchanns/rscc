@@ -43,5 +43,24 @@ fn test_compiler() -> Result<()> {
     assert_eq!(run("- -10")?, Some(10));
     assert_eq!(run("- - +10")?, Some(10));
 
+    assert_eq!(run("0==1")?, Some(0));
+    assert_eq!(run("42==42")?, Some(1));
+    assert_eq!(run("0!=1")?, Some(1));
+    assert_eq!(run("42!=42")?, Some(0));
+
+    assert_eq!(run("0<1")?, Some(1));
+    assert_eq!(run("1<1")?, Some(0));
+    assert_eq!(run("2<1")?, Some(0));
+    assert_eq!(run("0<=1")?, Some(1));
+    assert_eq!(run("1<=1")?, Some(1));
+    assert_eq!(run("2<=1")?, Some(0));
+
+    assert_eq!(run("1>0")?, Some(1));
+    assert_eq!(run("1>1")?, Some(0));
+    assert_eq!(run("1>2")?, Some(0));
+    assert_eq!(run("1>=0")?, Some(1));
+    assert_eq!(run("1>=1")?, Some(1));
+    assert_eq!(run("1>=2")?, Some(0));
+
     Ok(())
 }
