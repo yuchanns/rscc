@@ -4,7 +4,9 @@ use anyhow::{anyhow, Error, Result};
 
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
-    /// Keywords or punctuators
+    /// Identifiers
+    Ident,
+    /// Punctuators
     Punct,
     /// Numeric literal
     Num(isize),
@@ -99,6 +101,14 @@ pub fn tokenize(input: &mut String) -> Result<Peekable<IntoIter<Token>>> {
             tokens.push(new_token(TokenKind::Num(num), pos, lexeme));
             pos += end;
             input = rest;
+            continue;
+        }
+
+        // Identifier
+        if input.starts_with(|c: char| c.is_alphabetic()) {
+            tokens.push(new_token(TokenKind::Ident, pos, &input[..1]));
+            pos += 1;
+            input = &input[1..];
             continue;
         }
 

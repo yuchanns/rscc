@@ -22,8 +22,28 @@ fn push() {
 }
 
 fn pop(arg: &str) {
-    println!(" ldr {arg}, [sp], #16");
+    println!("  ldr {arg}, [sp], #16");
     current_depth().fetch_sub(1, SeqCst);
+}
+
+/// Compute the absolute address of a given node.
+/// error if a given node does not reside in memory.
+fn gen_addr(node: Option<&Node>) -> Result<()> {
+    let Some(node) = node else {
+        return Ok(());
+    };
+
+    let NodeKind::Var(name) = node.kind else {
+        return Err(anyhow!("not an lvalue"));
+    };
+    let Some(c) = name.chars().next() else {
+        return Err(anyhow!("expect a single letter"));
+    };
+    let offset = (c.to_ascii_lowercase() as u8 - b'a' + 1) * 8;
+
+    println!("  sub x0, x29, #{}", offset);
+
+    Ok(())
 }
 
 fn gen_expr(node: Option<&Node>) -> Result<()> {
@@ -36,6 +56,17 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     } else if let NodeKind::Neg = node.kind {
         gen_expr(node.lhs.as_deref())?;
         println!("  neg x0, x0");
+        return Ok(());
+    } else if let NodeKind::Var(_) = node.kind {
+        gen_addr(Some(node))?;
+        println!("  ldr x0, [x0]");
+        return Ok(());
+    } else if let NodeKind::Assign = node.kind {
+        gen_addr(node.lhs.as_deref())?;
+        push();
+        gen_expr(node.rhs.as_deref())?;
+        pop("x1");
+        println!("  str x0, [x1]");
         return Ok(());
     }
     gen_expr(node.rhs.as_deref())?;
@@ -91,10 +122,18 @@ pub fn codegen(nodes: &IntoIter<Node>) -> Result<()> {
         println!("_main:");
     }
 
+    // Prologue
+    println!("  stp x29, x30, [sp, #-16]!");
+    println!("  mov x29, sp");
+    println!("  sub sp, sp, #208");
+
     for node in nodes.as_slice() {
         gen_stmt(node)?;
+        assert_eq!(current_depth().load(SeqCst), 0);
     }
 
+    println!("  mov sp, x29");
+    println!("  ldp x29, x30, [sp], #16");
     println!("  ret");
 
     Ok(())

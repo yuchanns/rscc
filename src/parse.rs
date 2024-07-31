@@ -1,6 +1,9 @@
 use std::{iter::Peekable, vec::IntoIter};
 
-use crate::tokenize::{equal, skip, Token, TokenKind};
+use crate::{
+    new_error_tok,
+    tokenize::{equal, skip, Token, TokenKind},
+};
 use anyhow::Result;
 
 #[derive(Debug, PartialEq)]
@@ -23,8 +26,12 @@ pub enum NodeKind {
     Lt,
     /// <=
     Le,
+    /// =
+    Assign,
     /// Expression statement
     ExprStmt,
+    /// Veriable
+    Var(&'static str),
     /// Integer
     Num(isize),
 }
@@ -64,6 +71,14 @@ fn new_num(val: isize) -> Node {
     }
 }
 
+fn new_var_node(name: &'static str) -> Node {
+    Node {
+        kind: NodeKind::Var(name),
+        lhs: None,
+        rhs: None,
+    }
+}
+
 /// stmt = expr-stmt
 fn stmt(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Node> {
     expr_stmt(tokens)
@@ -76,9 +91,21 @@ fn expr_stmt(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Node> {
     Ok(node)
 }
 
-/// expr = equality
+/// expr = assign
 pub fn expr(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
-    equality(tokens)
+    assign(tokens)
+}
+
+/// assign = equality ("=" assign)?
+pub fn assign(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
+    let mut node = equality(tokens)?;
+    if let Some(tok) = tokens.peek() {
+        if equal(tok, "=") {
+            tokens.next();
+            node = Some(new_binary(NodeKind::Assign, node, assign(tokens)?));
+        }
+    }
+    Ok(node)
 }
 
 /// equality = relational ("==" relational | "!=" relational)*
@@ -188,7 +215,7 @@ pub fn unary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     primary(tokens)
 }
 
-/// primary = "(" expr ")" | num
+/// primary = "(" expr ")" | ident | num
 pub fn primary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     let Some(tok) = tokens.peek() else {
         return Ok(None);
@@ -198,13 +225,17 @@ pub fn primary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
         let node = expr(tokens)?;
         skip(tokens, ")")?;
         return Ok(node);
+    } else if let TokenKind::Ident = tok.kind {
+        let node = new_var_node(tok.lexeme);
+        tokens.next();
+        return Ok(Some(node));
     } else if let TokenKind::Num(num) = tok.kind {
         let node = new_num(num);
         tokens.next();
         return Ok(Some(node));
     }
 
-    unreachable!("primary")
+    Err(new_error_tok(tok, "expected an expression"))
 }
 
 /// program = stmt*
