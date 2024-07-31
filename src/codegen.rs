@@ -1,9 +1,12 @@
-use std::sync::{
-    atomic::{AtomicIsize, Ordering::SeqCst},
-    OnceLock,
+use std::{
+    sync::{
+        atomic::{AtomicIsize, Ordering::SeqCst},
+        OnceLock,
+    },
+    vec::IntoIter,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::parse::{Node, NodeKind};
 
@@ -69,7 +72,14 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     Ok(())
 }
 
-pub fn codegen(node: Option<Node>) -> Result<()> {
+fn gen_stmt(node: &Node) -> Result<()> {
+    let NodeKind::ExprStmt = node.kind else {
+        return Err(anyhow!("invalid statement"));
+    };
+    gen_expr(node.lhs.as_deref())
+}
+
+pub fn codegen(nodes: &IntoIter<Node>) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     {
         println!("  .global main");
@@ -81,8 +91,9 @@ pub fn codegen(node: Option<Node>) -> Result<()> {
         println!("_main:");
     }
 
-    // Traverse the AST to emit assembly
-    gen_expr(node.as_ref())?;
+    for node in nodes.as_slice() {
+        gen_stmt(node)?;
+    }
 
     println!("  ret");
 

@@ -23,6 +23,8 @@ pub enum NodeKind {
     Lt,
     /// <=
     Le,
+    /// Expression statement
+    ExprStmt,
     /// Integer
     Num(isize),
 }
@@ -60,6 +62,18 @@ fn new_num(val: isize) -> Node {
         lhs: None,
         rhs: None,
     }
+}
+
+/// stmt = expr-stmt
+fn stmt(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Node> {
+    expr_stmt(tokens)
+}
+
+/// expr-stmt = expr ";"
+fn expr_stmt(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Node> {
+    let node = new_unary(NodeKind::ExprStmt, expr(tokens)?);
+    skip(tokens, ";")?;
+    Ok(node)
 }
 
 /// expr = equality
@@ -191,4 +205,16 @@ pub fn primary(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Option<Node>> {
     }
 
     unreachable!("primary")
+}
+
+/// program = stmt*
+pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<IntoIter<Node>> {
+    let mut nodes = Vec::new();
+    while let Some(tok) = tokens.peek() {
+        if tok.kind == TokenKind::Eof {
+            break;
+        }
+        nodes.push(stmt(tokens)?);
+    }
+    Ok(nodes.into_iter())
 }

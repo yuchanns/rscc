@@ -18,9 +18,7 @@ pub fn run() -> Result<()> {
         return Err(anyhow!("{name}: invalid number of arguments"));
     };
 
-    // Tokenize and parse
     let mut tokens = tokenize(arg)?;
-    let node = expr(&mut tokens)?;
-
-    codegen(node)
+    let nodes = parse(&mut tokens)?;
+    codegen(&nodes)
 }
