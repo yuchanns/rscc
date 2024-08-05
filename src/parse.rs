@@ -43,6 +43,8 @@ pub enum NodeKind {
     Le,
     /// =
     Assign,
+    /// "return"
+    Return,
     /// Expression statement
     ExprStmt,
     /// Veriable
@@ -108,11 +110,20 @@ fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<R
     obj
 }
 
-/// stmt = expr-stmt
+/// stmt = "return" expr ";"
+///      | expr-stmt
 fn stmt(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut VecDeque<Rc<RefCell<Obj>>>,
 ) -> Result<Node> {
+    if let Some(tok) = tokens.peek() {
+        if equal(tok, "return") {
+            tokens.next();
+            let node = new_unary(NodeKind::Return, expr(tokens, locals)?);
+            skip(tokens, ";")?;
+            return Ok(node);
+        }
+    }
     expr_stmt(tokens, locals)
 }
 

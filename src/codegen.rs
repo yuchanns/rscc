@@ -106,10 +106,15 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
 }
 
 fn gen_stmt(node: &Node) -> Result<()> {
-    let NodeKind::ExprStmt = node.kind else {
-        return Err(anyhow!("invalid statement"));
-    };
-    gen_expr(node.lhs.as_deref())
+    match node.kind {
+        NodeKind::Return => {
+            gen_expr(node.lhs.as_deref())?;
+            println!("  b .L.return");
+            Ok(())
+        }
+        NodeKind::ExprStmt => gen_expr(node.lhs.as_deref()),
+        _ => Err(anyhow!("invalid statement")),
+    }
 }
 
 fn assign_lvar_offsets(prog: &mut Function) {
@@ -145,6 +150,7 @@ pub fn codegen(prog: &mut Function) -> Result<()> {
         assert_eq!(current_depth().load(SeqCst), 0);
     }
 
+    println!(".L.return:");
     println!("  mov sp, x29");
     println!("  ldp x29, x30, [sp], #16");
     println!("  ret");
