@@ -8,6 +8,8 @@ pub enum TokenKind {
     Ident,
     /// Punctuators
     Punct,
+    /// Keywords
+    Keyword,
     /// Numeric literal
     Num(isize),
     /// End-of-file markers
@@ -79,7 +81,15 @@ fn read_punct(input: &str) -> Option<usize> {
     }
 }
 
-/// Tokenize `current_input` and nreturns new tokens
+fn convert_keywords(tokens: &mut [Token]) {
+    for tok in tokens.iter_mut() {
+        if equal(tok, "return") {
+            tok.kind = TokenKind::Keyword;
+        }
+    }
+}
+
+/// Tokenize a given string and returns new tokens.
 pub fn tokenize(input: &mut String) -> Result<Peekable<IntoIter<Token>>> {
     GLOBAL_INPUT
         .set(take(input))
@@ -114,7 +124,7 @@ pub fn tokenize(input: &mut String) -> Result<Peekable<IntoIter<Token>>> {
             continue;
         }
 
-        // Identifier
+        // Identifier or keyword
         if input.starts_with(|c: char| is_ident1(c)) {
             let end = input.find(|c: char| !is_ident2(c)).unwrap_or(input.len());
             let (lexeme, rest) = input.split_at(end);
@@ -136,6 +146,7 @@ pub fn tokenize(input: &mut String) -> Result<Peekable<IntoIter<Token>>> {
     }
 
     tokens.push(new_token(TokenKind::Eof, pos, ""));
+    convert_keywords(&mut tokens);
 
     Ok(tokens.into_iter().peekable())
 }
