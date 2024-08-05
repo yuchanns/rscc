@@ -161,11 +161,22 @@ fn compound_stmt(
     })
 }
 
-/// expr-stmt = expr ";"
+/// expr-stmt = expr? ";"
 fn expr_stmt(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut VecDeque<Rc<RefCell<Obj>>>,
 ) -> Result<Node> {
+    if let Some(tok) = tokens.peek() {
+        if equal(tok, ";") {
+            tokens.next();
+            return Ok(Node {
+                kind: NodeKind::Block,
+                lhs: None,
+                rhs: None,
+                body: None,
+            });
+        }
+    }
     let node = new_unary(NodeKind::ExprStmt, expr(tokens, locals)?);
     skip(tokens, ";")?;
     Ok(node)

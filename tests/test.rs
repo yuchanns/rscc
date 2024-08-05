@@ -73,6 +73,7 @@ fn test_compiler() -> Result<()> {
     assert_eq!(run("{ 1; 2; return 3; }")?, Some(3));
 
     assert_eq!(run("{ {1; {2;} return 3;} }")?, Some(3));
+    assert_eq!(run("{ ;;; return 5; }")?, Some(5));
 
     Ok(())
 }
