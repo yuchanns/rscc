@@ -59,6 +59,16 @@ fn new_token(kind: TokenKind, pos: usize, lexeme: &'static str) -> Token {
     Token { kind, pos, lexeme }
 }
 
+/// Returns true if c is valid as the first character of an identifier
+fn is_ident1(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_'
+}
+
+/// Returns true if c is valid as a non-first character of an identifier
+fn is_ident2(c: char) -> bool {
+    is_ident1(c) || c.is_ascii_digit()
+}
+
 /// Read a punctuator token from input and returns its length
 fn read_punct(input: &str) -> Option<usize> {
     let mut chars = input.chars();
@@ -105,10 +115,12 @@ pub fn tokenize(input: &mut String) -> Result<Peekable<IntoIter<Token>>> {
         }
 
         // Identifier
-        if input.starts_with(|c: char| c.is_alphabetic()) {
-            tokens.push(new_token(TokenKind::Ident, pos, &input[..1]));
-            pos += 1;
-            input = &input[1..];
+        if input.starts_with(|c: char| is_ident1(c)) {
+            let end = input.find(|c: char| !is_ident2(c)).unwrap_or(input.len());
+            let (lexeme, rest) = input.split_at(end);
+            tokens.push(new_token(TokenKind::Ident, pos, lexeme));
+            pos += end;
+            input = rest;
             continue;
         }
 

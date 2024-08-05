@@ -19,6 +19,6 @@ pub fn run() -> Result<()> {
     };
 
     let mut tokens = tokenize(arg)?;
-    let nodes = parse(&mut tokens)?;
-    codegen(&nodes)
+    let mut prog = parse(&mut tokens)?;
+    codegen(&mut prog)
 }
