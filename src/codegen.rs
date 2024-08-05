@@ -1,14 +1,14 @@
-use std::{
-    sync::{
-        atomic::{AtomicIsize, Ordering::SeqCst},
-        OnceLock,
-    },
-    vec::IntoIter,
+use std::sync::{
+    atomic::{AtomicIsize, Ordering::SeqCst},
+    OnceLock,
 };
 
 use anyhow::{anyhow, Result};
 
-use crate::parse::{Node, NodeKind};
+use crate::{
+    parse::{Node, NodeKind},
+    Function,
+};
 
 static GLOBAL_DEPTH: OnceLock<AtomicIsize> = OnceLock::new();
 
@@ -26,6 +26,12 @@ fn pop(arg: &str) {
     current_depth().fetch_sub(1, SeqCst);
 }
 
+/// Round up `n` to the nearest multiple of `align`.
+/// For instance, align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+fn align_to(n: isize, align: isize) -> isize {
+    (n + align - 1) / align * align
+}
+
 /// Compute the absolute address of a given node.
 /// error if a given node does not reside in memory.
 fn gen_addr(node: Option<&Node>) -> Result<()> {
@@ -33,15 +39,11 @@ fn gen_addr(node: Option<&Node>) -> Result<()> {
         return Ok(());
     };
 
-    let NodeKind::Var(name) = node.kind else {
+    let NodeKind::Var(obj) = &node.kind else {
         return Err(anyhow!("not an lvalue"));
     };
-    let Some(c) = name.chars().next() else {
-        return Err(anyhow!("expect a single letter"));
-    };
-    let offset = (c.to_ascii_lowercase() as u8 - b'a' + 1) * 8;
 
-    println!("  sub x0, x29, #{}", offset);
+    println!("  sub x0, x29, #{}", obj.as_ref().borrow().offset);
 
     Ok(())
 }
@@ -110,7 +112,18 @@ fn gen_stmt(node: &Node) -> Result<()> {
     gen_expr(node.lhs.as_deref())
 }
 
-pub fn codegen(nodes: &IntoIter<Node>) -> Result<()> {
+fn assign_lvar_offsets(prog: &mut Function) {
+    let mut offset = 0;
+    while let Some(var) = prog.locals.pop_back() {
+        offset += 8;
+        var.as_ref().borrow_mut().offset = offset;
+    }
+    prog.stack_size = align_to(offset, 16);
+}
+
+pub fn codegen(prog: &mut Function) -> Result<()> {
+    assign_lvar_offsets(prog);
+
     #[cfg(not(target_os = "macos"))]
     {
         println!("  .global main");
@@ -125,9 +138,9 @@ pub fn codegen(nodes: &IntoIter<Node>) -> Result<()> {
     // Prologue
     println!("  stp x29, x30, [sp, #-16]!");
     println!("  mov x29, sp");
-    println!("  sub sp, sp, #208");
+    println!("  sub sp, sp, #{}", prog.stack_size);
 
-    for node in nodes.as_slice() {
+    for node in prog.body.as_slice() {
         gen_stmt(node)?;
         assert_eq!(current_depth().load(SeqCst), 0);
     }

@@ -67,6 +67,8 @@ fn test_compiler() -> Result<()> {
     assert_eq!(run("a=3; a;")?, Some(3));
     assert_eq!(run("a=3; z=5; a+z;")?, Some(8));
     assert_eq!(run("a=b=3; a+b;")?, Some(6));
+    assert_eq!(run("foo=3; foo;")?, Some(3));
+    assert_eq!(run("foo123=3; bar=5; foo123+bar;")?, Some(8));
 
     Ok(())
 }
