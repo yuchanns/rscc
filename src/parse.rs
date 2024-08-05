@@ -45,6 +45,8 @@ pub enum NodeKind {
     Assign,
     /// "return"
     Return,
+    /// { ... }
+    Block,
     /// Expression statement
     ExprStmt,
     /// Veriable
@@ -62,6 +64,7 @@ pub struct Node {
     pub lhs: Option<Box<Node>>,
     /// Right-hand side
     pub rhs: Option<Box<Node>>,
+    pub body: Option<IntoIter<Node>>,
 }
 
 fn find_var(tok: &Token, locals: &VecDeque<Rc<RefCell<Obj>>>) -> Option<Rc<RefCell<Obj>>> {
@@ -77,6 +80,7 @@ fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
         kind,
         lhs: lhs.map(Box::new),
         rhs: rhs.map(Box::new),
+        body: None,
     }
 }
 
@@ -85,6 +89,7 @@ fn new_unary(kind: NodeKind, expr: Option<Node>) -> Node {
         kind,
         lhs: expr.map(Box::new),
         rhs: None,
+        body: None,
     }
 }
 
@@ -93,6 +98,7 @@ fn new_num(val: isize) -> Node {
         kind: NodeKind::Num(val),
         lhs: None,
         rhs: None,
+        body: None,
     }
 }
 
@@ -101,6 +107,7 @@ fn new_var_node(var: Rc<RefCell<Obj>>) -> Node {
         kind: NodeKind::Var(var),
         lhs: None,
         rhs: None,
+        body: None,
     }
 }
 
@@ -111,6 +118,7 @@ fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<R
 }
 
 /// stmt = "return" expr ";"
+///      | "{" compound-stmt
 ///      | expr-stmt
 fn stmt(
     tokens: &mut Peekable<IntoIter<Token>>,
@@ -123,8 +131,34 @@ fn stmt(
             skip(tokens, ";")?;
             return Ok(node);
         }
+
+        if equal(tok, "{") {
+            tokens.next();
+            return compound_stmt(tokens, locals);
+        }
     }
     expr_stmt(tokens, locals)
+}
+
+// compound-stmt = stmt * "}"
+fn compound_stmt(
+    tokens: &mut Peekable<IntoIter<Token>>,
+    locals: &mut VecDeque<Rc<RefCell<Obj>>>,
+) -> Result<Node> {
+    let mut nodes = Vec::new();
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, "}") {
+            break;
+        }
+        nodes.push(stmt(tokens, locals)?);
+    }
+    tokens.next();
+    Ok(Node {
+        kind: NodeKind::Block,
+        lhs: None,
+        rhs: None,
+        body: Some(nodes.into_iter()),
+    })
 }
 
 /// expr-stmt = expr ";"
@@ -315,14 +349,11 @@ pub fn primary(
 
 /// program = stmt*
 pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
+    skip(tokens, "{")?;
     let mut nodes = Vec::new();
     let mut locals = VecDeque::new();
-    while let Some(tok) = tokens.peek() {
-        if tok.kind == TokenKind::Eof {
-            break;
-        }
-        nodes.push(stmt(tokens, &mut locals)?);
-    }
+    nodes.push(compound_stmt(tokens, &mut locals)?);
+
     Ok(Function {
         body: nodes.into_iter(),
         locals,
