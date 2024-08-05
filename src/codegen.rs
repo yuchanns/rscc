@@ -107,6 +107,14 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
 
 fn gen_stmt(node: &Node) -> Result<()> {
     match node.kind {
+        NodeKind::Block => {
+            if let Some(nodes) = &node.body {
+                for node in nodes.as_slice() {
+                    gen_stmt(node)?;
+                }
+            }
+            Ok(())
+        }
         NodeKind::Return => {
             gen_expr(node.lhs.as_deref())?;
             println!("  b .L.return");
