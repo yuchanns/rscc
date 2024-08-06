@@ -94,5 +94,7 @@ fn test_compiler() -> Result<()> {
     );
     assert_eq!(run("{ for (;;) {return 3;} return 5; }")?, Some(3));
 
+    assert_eq!(run("{ i=0; while(i<10) i=i+1; return i; }")?, Some(10));
+
     Ok(())
 }

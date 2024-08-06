@@ -81,7 +81,7 @@ fn read_punct(input: &str) -> Option<usize> {
     }
 }
 
-const KW: &[&str] = &["return", "if", "else", "for"];
+const KW: &[&str] = &["return", "if", "else", "for", "while"];
 
 fn is_keyword(tok: &Token) -> bool {
     KW.iter().any(|&k| equal(tok, k))

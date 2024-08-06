@@ -132,10 +132,9 @@ fn gen_stmt(node: &Node) -> Result<()> {
         }
         NodeKind::For => {
             let c = current_count().fetch_add(1, SeqCst);
-            let Some(init) = &node.init else {
-                return Err(anyhow!("expected init clause"));
-            };
-            gen_stmt(init)?;
+            if let Some(init) = &node.init {
+                gen_stmt(init)?;
+            }
             println!(".L.begin.{c}:");
             gen_expr(node.cond.as_deref())?;
             println!("  cmp x0, #0");

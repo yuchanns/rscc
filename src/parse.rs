@@ -47,7 +47,7 @@ pub enum NodeKind {
     Return,
     /// "if"
     If,
-    /// "for"
+    /// "for" or "while"
     For,
     /// { ... }
     Block,
@@ -150,6 +150,7 @@ fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<R
 /// stmt = "return" expr ";"
 ///      | "if" "(" expr ")" stmt ("else" stmt)?
 ///      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
+///      | "while" "(" expr ")" stmt
 ///      | "{" compound-stmt
 ///      | expr-stmt
 fn stmt(
@@ -227,6 +228,26 @@ fn stmt(
                 els: None,
                 init: Some(Box::new(init)),
                 inc: inc.map(Box::new),
+            });
+        }
+
+        if equal(tok, "while") {
+            tokens.next();
+            skip(tokens, "(")?;
+            let cond = expr(tokens, locals)?;
+            skip(tokens, ")")?;
+            let then = stmt(tokens, locals)?;
+
+            return Ok(Node {
+                kind: NodeKind::For,
+                lhs: None,
+                rhs: None,
+                body: None,
+                cond: cond.map(Box::new),
+                then: Some(Box::new(then)),
+                els: None,
+                init: None,
+                inc: None,
             });
         }
 
