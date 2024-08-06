@@ -130,6 +130,25 @@ fn gen_stmt(node: &Node) -> Result<()> {
             println!(".L.end.{c}:");
             Ok(())
         }
+        NodeKind::For => {
+            let c = current_count().fetch_add(1, SeqCst);
+            let Some(init) = &node.init else {
+                return Err(anyhow!("expected init clause"));
+            };
+            gen_stmt(init)?;
+            println!(".L.begin.{c}:");
+            gen_expr(node.cond.as_deref())?;
+            println!("  cmp x0, #0");
+            println!("  b.eq .L.end.{c}");
+            let Some(then) = &node.then else {
+                return Err(anyhow!("expected then clause"));
+            };
+            gen_stmt(then)?;
+            gen_expr(node.inc.as_deref())?;
+            println!("  b .L.begin.{c}");
+            println!(".L.end.{c}:");
+            Ok(())
+        }
         NodeKind::Block => {
             if let Some(nodes) = &node.body {
                 for node in nodes.as_slice() {

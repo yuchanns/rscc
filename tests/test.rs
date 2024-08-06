@@ -88,5 +88,11 @@ fn test_compiler() -> Result<()> {
         Some(3)
     );
 
+    assert_eq!(
+        run("{ i=0; j=0; for (i=0; i<=10; i=i+1) j=i+j; return j; }")?,
+        Some(55)
+    );
+    assert_eq!(run("{ for (;;) {return 3;} return 5; }")?, Some(3));
+
     Ok(())
 }

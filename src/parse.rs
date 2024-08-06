@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::VecDeque, iter::Peekable, rc::Rc, vec::IntoIter};
 
 use crate::{
-    new_error_tok,
+    current_input, new_error_at, new_error_tok,
     tokenize::{equal, skip, Token, TokenKind},
 };
 use anyhow::Result;
@@ -47,6 +47,8 @@ pub enum NodeKind {
     Return,
     /// "if"
     If,
+    /// "for"
+    For,
     /// { ... }
     Block,
     /// Expression statement
@@ -67,10 +69,12 @@ pub struct Node {
     /// Right-hand side
     pub rhs: Option<Box<Node>>,
     pub body: Option<IntoIter<Node>>,
-    /// "if" statement
+    /// "if" or "for" statement
     pub cond: Option<Box<Node>>,
     pub then: Option<Box<Node>>,
     pub els: Option<Box<Node>>,
+    pub init: Option<Box<Node>>,
+    pub inc: Option<Box<Node>>,
 }
 
 fn find_var(tok: &Token, locals: &VecDeque<Rc<RefCell<Obj>>>) -> Option<Rc<RefCell<Obj>>> {
@@ -90,6 +94,8 @@ fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
         cond: None,
         then: None,
         els: None,
+        init: None,
+        inc: None,
     }
 }
 
@@ -102,6 +108,8 @@ fn new_unary(kind: NodeKind, expr: Option<Node>) -> Node {
         cond: None,
         then: None,
         els: None,
+        init: None,
+        inc: None,
     }
 }
 
@@ -114,6 +122,8 @@ fn new_num(val: isize) -> Node {
         cond: None,
         then: None,
         els: None,
+        init: None,
+        inc: None,
     }
 }
 
@@ -126,6 +136,8 @@ fn new_var_node(var: Rc<RefCell<Obj>>) -> Node {
         cond: None,
         then: None,
         els: None,
+        init: None,
+        inc: None,
     }
 }
 
@@ -137,6 +149,7 @@ fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<R
 
 /// stmt = "return" expr ";"
 ///      | "if" "(" expr ")" stmt ("else" stmt)?
+///      | "for" "(" expr-stmt expr? ";" expr? ")" stmt
 ///      | "{" compound-stmt
 ///      | expr-stmt
 fn stmt(
@@ -175,6 +188,45 @@ fn stmt(
                 cond: cond.map(Box::new),
                 then: then.map(Box::new),
                 els: els.map(Box::new),
+                init: None,
+                inc: None,
+            });
+        }
+
+        if equal(tok, "for") {
+            tokens.next();
+            skip(tokens, "(")?;
+            let init = expr_stmt(tokens, locals)?;
+            let Some(maby_cond) = tokens.peek() else {
+                return Err(new_error_at(current_input().len(), "expected token"));
+            };
+            let cond = if equal(maby_cond, ";") {
+                None
+            } else {
+                expr(tokens, locals)?
+            };
+            skip(tokens, ";")?;
+            let Some(maby_inc) = tokens.peek() else {
+                return Err(new_error_at(current_input().len(), "expected token"));
+            };
+            let inc = if equal(maby_inc, ")") {
+                None
+            } else {
+                expr(tokens, locals)?
+            };
+            skip(tokens, ")")?;
+            let then = stmt(tokens, locals)?;
+
+            return Ok(Node {
+                kind: NodeKind::For,
+                lhs: None,
+                rhs: None,
+                body: None,
+                cond: cond.map(Box::new),
+                then: Some(Box::new(then)),
+                els: None,
+                init: Some(Box::new(init)),
+                inc: inc.map(Box::new),
             });
         }
 
@@ -207,6 +259,8 @@ fn compound_stmt(
         cond: None,
         then: None,
         els: None,
+        init: None,
+        inc: None,
     })
 }
 
@@ -226,6 +280,8 @@ fn expr_stmt(
                 cond: None,
                 then: None,
                 els: None,
+                init: None,
+                inc: None,
             });
         }
     }

@@ -47,7 +47,7 @@ pub fn equal(token: &Token, op: &str) -> bool {
 /// Ensure that the current token is `op`
 pub fn skip(tokens: &mut Peekable<IntoIter<Token>>, op: &str) -> Result<()> {
     let Some(tok) = tokens.peek() else {
-        return Err(anyhow!("expected token"));
+        return Err(new_error_at(current_input().len(), "expected token"));
     };
     if !equal(tok, op) {
         return Err(new_error_tok(tok, &format!("expected '{op}'")));
@@ -81,7 +81,7 @@ fn read_punct(input: &str) -> Option<usize> {
     }
 }
 
-const KW: &[&str] = &["return", "if", "else"];
+const KW: &[&str] = &["return", "if", "else", "for"];
 
 fn is_keyword(tok: &Token) -> bool {
     KW.iter().any(|&k| equal(tok, k))
