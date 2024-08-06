@@ -12,8 +12,14 @@ use crate::{
 
 static GLOBAL_DEPTH: OnceLock<AtomicIsize> = OnceLock::new();
 
+static GLOBAL_COUNT: OnceLock<AtomicIsize> = OnceLock::new();
+
 fn current_depth() -> &'static AtomicIsize {
     GLOBAL_DEPTH.get_or_init(|| AtomicIsize::new(0))
+}
+
+fn current_count() -> &'static AtomicIsize {
+    GLOBAL_COUNT.get_or_init(|| AtomicIsize::new(0))
 }
 
 fn push() {
@@ -107,6 +113,23 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
 
 fn gen_stmt(node: &Node) -> Result<()> {
     match node.kind {
+        NodeKind::If => {
+            let c = current_count().fetch_add(1, SeqCst);
+            gen_expr(node.cond.as_deref())?;
+            println!("  cmp x0, #0");
+            println!("  b.eq .L.else.{c}");
+            let Some(then) = &node.then else {
+                return Err(anyhow!("expected then clause"));
+            };
+            gen_stmt(then)?;
+            println!("  b .L.end.{c}");
+            println!(".L.else.{c}:");
+            if let Some(els) = &node.els {
+                gen_stmt(els)?;
+            };
+            println!(".L.end.{c}:");
+            Ok(())
+        }
         NodeKind::Block => {
             if let Some(nodes) = &node.body {
                 for node in nodes.as_slice() {
