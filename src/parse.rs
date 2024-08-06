@@ -45,6 +45,8 @@ pub enum NodeKind {
     Assign,
     /// "return"
     Return,
+    /// "if"
+    If,
     /// { ... }
     Block,
     /// Expression statement
@@ -65,6 +67,10 @@ pub struct Node {
     /// Right-hand side
     pub rhs: Option<Box<Node>>,
     pub body: Option<IntoIter<Node>>,
+    /// "if" statement
+    pub cond: Option<Box<Node>>,
+    pub then: Option<Box<Node>>,
+    pub els: Option<Box<Node>>,
 }
 
 fn find_var(tok: &Token, locals: &VecDeque<Rc<RefCell<Obj>>>) -> Option<Rc<RefCell<Obj>>> {
@@ -81,6 +87,9 @@ fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
         lhs: lhs.map(Box::new),
         rhs: rhs.map(Box::new),
         body: None,
+        cond: None,
+        then: None,
+        els: None,
     }
 }
 
@@ -90,6 +99,9 @@ fn new_unary(kind: NodeKind, expr: Option<Node>) -> Node {
         lhs: expr.map(Box::new),
         rhs: None,
         body: None,
+        cond: None,
+        then: None,
+        els: None,
     }
 }
 
@@ -99,6 +111,9 @@ fn new_num(val: isize) -> Node {
         lhs: None,
         rhs: None,
         body: None,
+        cond: None,
+        then: None,
+        els: None,
     }
 }
 
@@ -108,6 +123,9 @@ fn new_var_node(var: Rc<RefCell<Obj>>) -> Node {
         lhs: None,
         rhs: None,
         body: None,
+        cond: None,
+        then: None,
+        els: None,
     }
 }
 
@@ -118,6 +136,7 @@ fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<R
 }
 
 /// stmt = "return" expr ";"
+///      | "if" "(" expr ")" stmt ("else" stmt)?
 ///      | "{" compound-stmt
 ///      | expr-stmt
 fn stmt(
@@ -130,6 +149,33 @@ fn stmt(
             let node = new_unary(NodeKind::Return, expr(tokens, locals)?);
             skip(tokens, ";")?;
             return Ok(node);
+        }
+
+        if equal(tok, "if") {
+            tokens.next();
+            skip(tokens, "(")?;
+            let cond = expr(tokens, locals)?;
+            skip(tokens, ")")?;
+            let then = Some(stmt(tokens, locals)?);
+            let els = if let Some(tok) = tokens.peek() {
+                if equal(tok, "else") {
+                    tokens.next();
+                    Some(stmt(tokens, locals)?)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            return Ok(Node {
+                kind: NodeKind::If,
+                lhs: None,
+                rhs: None,
+                body: None,
+                cond: cond.map(Box::new),
+                then: then.map(Box::new),
+                els: els.map(Box::new),
+            });
         }
 
         if equal(tok, "{") {
@@ -158,6 +204,9 @@ fn compound_stmt(
         lhs: None,
         rhs: None,
         body: Some(nodes.into_iter()),
+        cond: None,
+        then: None,
+        els: None,
     })
 }
 
@@ -174,6 +223,9 @@ fn expr_stmt(
                 lhs: None,
                 rhs: None,
                 body: None,
+                cond: None,
+                then: None,
+                els: None,
             });
         }
     }

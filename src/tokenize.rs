@@ -81,12 +81,17 @@ fn read_punct(input: &str) -> Option<usize> {
     }
 }
 
+const KW: &[&str] = &["return", "if", "else"];
+
+fn is_keyword(tok: &Token) -> bool {
+    KW.iter().any(|&k| equal(tok, k))
+}
+
 fn convert_keywords(tokens: &mut [Token]) {
-    for tok in tokens.iter_mut() {
-        if equal(tok, "return") {
-            tok.kind = TokenKind::Keyword;
-        }
-    }
+    tokens
+        .iter_mut()
+        .filter(|tok| is_keyword(tok))
+        .for_each(|tok| tok.kind = TokenKind::Keyword);
 }
 
 /// Tokenize a given string and returns new tokens.
