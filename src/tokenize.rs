@@ -2,7 +2,7 @@ use std::{iter::Peekable, mem::take, sync::OnceLock, vec::IntoIter};
 
 use anyhow::{anyhow, Error, Result};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     /// Identifiers
     Ident,
@@ -17,7 +17,7 @@ pub enum TokenKind {
 }
 
 /// Token type
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,      // Token kind
     pub pos: usize,           // Token location

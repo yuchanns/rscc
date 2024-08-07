@@ -3,9 +3,10 @@ use std::sync::{
     OnceLock,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::{
+    new_error_tok,
     parse::{Node, NodeKind},
     Function,
 };
@@ -46,7 +47,7 @@ fn gen_addr(node: Option<&Node>) -> Result<()> {
     };
 
     let NodeKind::Var(obj) = &node.kind else {
-        return Err(anyhow!("not an lvalue"));
+        return Err(new_error_tok(&node.tok, "not an lvalue"));
     };
 
     println!("  sub x0, x29, #{}", obj.as_ref().borrow().offset);
@@ -106,7 +107,7 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
                 println!("  cset w0, le");
             }
         }
-        _ => unreachable!("gen_expr"),
+        _ => return Err(new_error_tok(&node.tok, "invalid expression")),
     }
     Ok(())
 }
@@ -119,7 +120,7 @@ fn gen_stmt(node: &Node) -> Result<()> {
             println!("  cmp x0, #0");
             println!("  b.eq .L.else.{c}");
             let Some(then) = &node.then else {
-                return Err(anyhow!("expected then clause"));
+                return Err(new_error_tok(&node.tok, "expected then clause"));
             };
             gen_stmt(then)?;
             println!("  b .L.end.{c}");
@@ -140,7 +141,7 @@ fn gen_stmt(node: &Node) -> Result<()> {
             println!("  cmp x0, #0");
             println!("  b.eq .L.end.{c}");
             let Some(then) = &node.then else {
-                return Err(anyhow!("expected then clause"));
+                return Err(new_error_tok(&node.tok, "expected then clause"));
             };
             gen_stmt(then)?;
             gen_expr(node.inc.as_deref())?;
@@ -162,7 +163,7 @@ fn gen_stmt(node: &Node) -> Result<()> {
             Ok(())
         }
         NodeKind::ExprStmt => gen_expr(node.lhs.as_deref()),
-        _ => Err(anyhow!("invalid statement")),
+        _ => Err(new_error_tok(&node.tok, "invalid statement")),
     }
 }
 
