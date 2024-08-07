@@ -1,0 +1,50 @@
+name: Test Compiler
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  test_macos_aarch64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Tests
+        run: |
+          cargo test test_compiler
+  test_linux_aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: uraimo/run-on-arch-action@v2
+        name: Run Tests
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ github.token }}
+          dockerRunArgs: |
+            --volume "${PWD}:/workspace"
+          install: |
+            # Install gcc, g++, libc6-dev and curl
+            apt-get update && apt-get install -y gcc g++ libc6-dev curl
+            # Install rust
+            export CARGO_HOME=$HOME/.cargo
+            export RUSTUP_HOME=$HOME/.rustup
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+            source $CARGO_HOME/env
+            cargo version
+          run: |
+            export CARGO_HOME=$HOME/.cargo
+            export RUSTUP_HOME=$HOME/.rustup
+            source $CARGO_HOME/env
+            # Run tests
+            cd /workspace
+            cargo test test_compiler
+
