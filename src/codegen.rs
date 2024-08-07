@@ -46,11 +46,15 @@ fn gen_addr(node: Option<&Node>) -> Result<()> {
         return Ok(());
     };
 
-    let NodeKind::Var(obj) = &node.kind else {
-        return Err(new_error_tok(&node.tok, "not an lvalue"));
-    };
-
-    println!("  sub x0, x29, #{}", obj.as_ref().borrow().offset);
+    match &node.kind {
+        NodeKind::Var(obj) => {
+            println!("  sub x0, x29, #{}", obj.as_ref().borrow().offset);
+        }
+        NodeKind::Deref => {
+            gen_expr(node.lhs.as_deref())?;
+        }
+        _ => return Err(new_error_tok(&node.tok, "not an lvalue")),
+    }
 
     Ok(())
 }
@@ -69,6 +73,13 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     } else if let NodeKind::Var(_) = node.kind {
         gen_addr(Some(node))?;
         println!("  ldr x0, [x0]");
+        return Ok(());
+    } else if let NodeKind::Deref = node.kind {
+        gen_expr(node.lhs.as_deref())?;
+        println!("  ldr x0, [x0]");
+        return Ok(());
+    } else if let NodeKind::Addr = node.kind {
+        gen_addr(node.lhs.as_deref())?;
         return Ok(());
     } else if let NodeKind::Assign = node.kind {
         gen_addr(node.lhs.as_deref())?;

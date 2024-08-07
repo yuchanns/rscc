@@ -1,3 +1,17 @@
+/// This module contains a recursive descent parser for the C language.
+///
+/// Most functions in this module are named after the symbols they are supposed to read from an
+/// input token list. For example, stmt() is responsible for reading a statement from a token
+/// list. The function then construct an AST node representing a statement.
+///
+/// Each function conceptually returns two values, an AST node and remaning part of the input
+/// tokens. The remaining tokens are returned to the caller via a mutable reference of the
+/// peekable iterator.
+///
+/// Input tokens are represented by a vector of Token instances. Unlike many recursive descent
+/// parses, we don't have the notion of the "input token stream".
+/// Most parsing functions don't change the global state of the parser.
+/// So it is very easy to lookahead arbitrary number of tokens in this parser.
 use std::{cell::RefCell, collections::VecDeque, iter::Peekable, rc::Rc, vec::IntoIter};
 
 use crate::{
@@ -43,6 +57,10 @@ pub enum NodeKind {
     Le,
     /// =
     Assign,
+    /// unary &
+    Addr,
+    /// unary *
+    Deref,
     /// "return"
     Return,
     /// "if"
@@ -472,7 +490,7 @@ pub fn mul(
     Ok(node)
 }
 
-/// unary = ("+" | "-") unary
+/// unary = ("+" | "-" | "*" | "&") unary
 ///       | primary
 pub fn unary(
     tokens: &mut Peekable<IntoIter<Token>>,
@@ -488,6 +506,18 @@ pub fn unary(
     if equal(tok, "-") {
         let tok = tokens.next().unwrap();
         return Ok(Some(new_unary(NodeKind::Neg, unary(tokens, locals)?, tok)));
+    }
+    if equal(tok, "&") {
+        let tok = tokens.next().unwrap();
+        return Ok(Some(new_unary(NodeKind::Addr, unary(tokens, locals)?, tok)));
+    }
+    if equal(tok, "*") {
+        let tok = tokens.next().unwrap();
+        return Ok(Some(new_unary(
+            NodeKind::Deref,
+            unary(tokens, locals)?,
+            tok,
+        )));
     }
     primary(tokens, locals)
 }
