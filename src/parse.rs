@@ -64,6 +64,7 @@ pub enum NodeKind {
 pub struct Node {
     /// Node kind
     pub kind: NodeKind,
+    pub tok: Token,
     /// Left-hand side
     pub lhs: Option<Box<Node>>,
     /// Right-hand side
@@ -85,7 +86,7 @@ fn find_var(tok: &Token, locals: &VecDeque<Rc<RefCell<Obj>>>) -> Option<Rc<RefCe
         .map(Rc::clone)
 }
 
-fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
+fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>, tok: Token) -> Node {
     Node {
         kind,
         lhs: lhs.map(Box::new),
@@ -96,10 +97,11 @@ fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
         els: None,
         init: None,
         inc: None,
+        tok,
     }
 }
 
-fn new_unary(kind: NodeKind, expr: Option<Node>) -> Node {
+fn new_unary(kind: NodeKind, expr: Option<Node>, tok: Token) -> Node {
     Node {
         kind,
         lhs: expr.map(Box::new),
@@ -110,10 +112,11 @@ fn new_unary(kind: NodeKind, expr: Option<Node>) -> Node {
         els: None,
         init: None,
         inc: None,
+        tok,
     }
 }
 
-fn new_num(val: isize) -> Node {
+fn new_num(val: isize, tok: Token) -> Node {
     Node {
         kind: NodeKind::Num(val),
         lhs: None,
@@ -124,10 +127,11 @@ fn new_num(val: isize) -> Node {
         els: None,
         init: None,
         inc: None,
+        tok,
     }
 }
 
-fn new_var_node(var: Rc<RefCell<Obj>>) -> Node {
+fn new_var_node(var: Rc<RefCell<Obj>>, tok: Token) -> Node {
     Node {
         kind: NodeKind::Var(var),
         lhs: None,
@@ -138,6 +142,7 @@ fn new_var_node(var: Rc<RefCell<Obj>>) -> Node {
         els: None,
         init: None,
         inc: None,
+        tok,
     }
 }
 
@@ -159,14 +164,14 @@ fn stmt(
 ) -> Result<Node> {
     if let Some(tok) = tokens.peek() {
         if equal(tok, "return") {
-            tokens.next();
-            let node = new_unary(NodeKind::Return, expr(tokens, locals)?);
+            let tok = tokens.next().unwrap();
+            let node = new_unary(NodeKind::Return, expr(tokens, locals)?, tok);
             skip(tokens, ";")?;
             return Ok(node);
         }
 
         if equal(tok, "if") {
-            tokens.next();
+            let tok = tokens.next().unwrap();
             skip(tokens, "(")?;
             let cond = expr(tokens, locals)?;
             skip(tokens, ")")?;
@@ -191,11 +196,12 @@ fn stmt(
                 els: els.map(Box::new),
                 init: None,
                 inc: None,
+                tok,
             });
         }
 
         if equal(tok, "for") {
-            tokens.next();
+            let tok = tokens.next().unwrap();
             skip(tokens, "(")?;
             let init = expr_stmt(tokens, locals)?;
             let Some(maby_cond) = tokens.peek() else {
@@ -228,11 +234,12 @@ fn stmt(
                 els: None,
                 init: Some(Box::new(init)),
                 inc: inc.map(Box::new),
+                tok,
             });
         }
 
         if equal(tok, "while") {
-            tokens.next();
+            let tok = tokens.next().unwrap();
             skip(tokens, "(")?;
             let cond = expr(tokens, locals)?;
             skip(tokens, ")")?;
@@ -248,6 +255,7 @@ fn stmt(
                 els: None,
                 init: None,
                 inc: None,
+                tok,
             });
         }
 
@@ -271,7 +279,7 @@ fn compound_stmt(
         }
         nodes.push(stmt(tokens, locals)?);
     }
-    tokens.next();
+    let tok = tokens.next().unwrap();
     Ok(Node {
         kind: NodeKind::Block,
         lhs: None,
@@ -282,6 +290,7 @@ fn compound_stmt(
         els: None,
         init: None,
         inc: None,
+        tok,
     })
 }
 
@@ -292,7 +301,7 @@ fn expr_stmt(
 ) -> Result<Node> {
     if let Some(tok) = tokens.peek() {
         if equal(tok, ";") {
-            tokens.next();
+            let tok = tokens.next().unwrap();
             return Ok(Node {
                 kind: NodeKind::Block,
                 lhs: None,
@@ -303,10 +312,12 @@ fn expr_stmt(
                 els: None,
                 init: None,
                 inc: None,
+                tok,
             });
         }
     }
-    let node = new_unary(NodeKind::ExprStmt, expr(tokens, locals)?);
+    let tok = tokens.peek().unwrap().clone();
+    let node = new_unary(NodeKind::ExprStmt, expr(tokens, locals)?, tok);
     skip(tokens, ";")?;
     Ok(node)
 }
@@ -327,8 +338,13 @@ pub fn assign(
     let mut node = equality(tokens, locals)?;
     if let Some(tok) = tokens.peek() {
         if equal(tok, "=") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Assign, node, assign(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(
+                NodeKind::Assign,
+                node,
+                assign(tokens, locals)?,
+                tok,
+            ));
         }
     }
     Ok(node)
@@ -342,13 +358,23 @@ pub fn equality(
     let mut node = relational(tokens, locals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "==") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Eq, node, relational(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(
+                NodeKind::Eq,
+                node,
+                relational(tokens, locals)?,
+                tok,
+            ));
             continue;
         }
         if equal(tok, "!=") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Ne, node, relational(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(
+                NodeKind::Ne,
+                node,
+                relational(tokens, locals)?,
+                tok,
+            ));
             continue;
         }
         break;
@@ -365,23 +391,23 @@ pub fn relational(
     let mut node = add(tokens, locals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "<") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Lt, node, add(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(NodeKind::Lt, node, add(tokens, locals)?, tok));
             continue;
         }
         if equal(tok, "<=") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Le, node, add(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(NodeKind::Le, node, add(tokens, locals)?, tok));
             continue;
         }
         if equal(tok, ">") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Lt, add(tokens, locals)?, node));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(NodeKind::Lt, add(tokens, locals)?, node, tok));
             continue;
         }
         if equal(tok, ">=") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Le, add(tokens, locals)?, node));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(NodeKind::Le, add(tokens, locals)?, node, tok));
             continue;
         }
         break;
@@ -398,13 +424,13 @@ pub fn add(
     let mut node = mul(tokens, locals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "+") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Add, node, mul(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(NodeKind::Add, node, mul(tokens, locals)?, tok));
             continue;
         }
         if equal(tok, "-") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Sub, node, mul(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(NodeKind::Sub, node, mul(tokens, locals)?, tok));
             continue;
         }
         break;
@@ -421,13 +447,23 @@ pub fn mul(
     let mut node = unary(tokens, locals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "*") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Mul, node, primary(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(
+                NodeKind::Mul,
+                node,
+                primary(tokens, locals)?,
+                tok,
+            ));
             continue;
         }
         if equal(tok, "/") {
-            tokens.next();
-            node = Some(new_binary(NodeKind::Div, node, primary(tokens, locals)?));
+            let tok = tokens.next().unwrap();
+            node = Some(new_binary(
+                NodeKind::Div,
+                node,
+                primary(tokens, locals)?,
+                tok,
+            ));
             continue;
         }
         break;
@@ -450,8 +486,8 @@ pub fn unary(
         return unary(tokens, locals);
     }
     if equal(tok, "-") {
-        tokens.next();
-        return Ok(Some(new_unary(NodeKind::Neg, unary(tokens, locals)?)));
+        let tok = tokens.next().unwrap();
+        return Ok(Some(new_unary(NodeKind::Neg, unary(tokens, locals)?, tok)));
     }
     primary(tokens, locals)
 }
@@ -475,12 +511,12 @@ pub fn primary(
         } else {
             new_lvar(tok.lexeme, locals)
         };
-        let node = new_var_node(var);
-        tokens.next();
+        let tok = tokens.next().unwrap();
+        let node = new_var_node(var, tok);
         return Ok(Some(node));
     } else if let TokenKind::Num(num) = tok.kind {
-        let node = new_num(num);
-        tokens.next();
+        let tok = tokens.next().unwrap();
+        let node = new_num(num, tok);
         return Ok(Some(node));
     }
 
