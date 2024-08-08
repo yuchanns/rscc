@@ -1,11 +1,13 @@
 mod codegen;
 mod parse;
 mod tokenize;
+mod r#type;
 
 use std::env;
 
 pub use codegen::*;
 pub use parse::*;
+pub use r#type::*;
 pub use tokenize::*;
 
 use anyhow::{anyhow, Result};

@@ -98,11 +98,13 @@ fn test_compiler() -> Result<()> {
 
     assert_eq!(run("{ x=3; return *&x; }")?, Some(3));
     assert_eq!(run("{ x=3; y=&x; z=&y; return **z; }")?, Some(3));
-    assert_eq!(run("{ x=3; y=5; return *(&x+8); }")?, Some(5));
-    assert_eq!(run("{ x=3; y=5; return *(&y-8); }")?, Some(3));
+    assert_eq!(run("{ x=3; y=5; return *(&x+1); }")?, Some(5));
+    assert_eq!(run("{ x=3; y=5; return *(&y-1); }")?, Some(3));
+    assert_eq!(run("{ x=3; y=5; return *(&x-(-1)); }")?, Some(5));
     assert_eq!(run("{ x=3; y=&x; *y=5; return x; }")?, Some(5));
-    assert_eq!(run("{ x=3; y=5; *(&x+8)=7; return y; }")?, Some(7));
-    assert_eq!(run("{ x=3; y=5; *(&y-8)=7; return x; }")?, Some(7));
+    assert_eq!(run("{ x=3; y=5; *(&x+1)=7; return y; }")?, Some(7));
+    assert_eq!(run("{ x=3; y=5; *(&y-2+1)=7; return x; }")?, Some(7));
+    assert_eq!(run("{ x=3; return (&x+2)-&x+3; }")?, Some(5));
 
     Ok(())
 }
