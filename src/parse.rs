@@ -12,11 +12,12 @@
 /// parses, we don't have the notion of the "input token stream".
 /// Most parsing functions don't change the global state of the parser.
 /// So it is very easy to lookahead arbitrary number of tokens in this parser.
-use std::{cell::RefCell, collections::VecDeque, iter::Peekable, rc::Rc, vec::IntoIter};
+use std::{cell::RefCell, collections::VecDeque, iter::Peekable, rc::Rc, sync::Arc, vec::IntoIter};
 
 use crate::{
-    current_input, new_error_at, new_error_tok,
+    add_type, current_input, is_integer, new_error_at, new_error_tok,
     tokenize::{equal, skip, Token, TokenKind},
+    Type, TY_INT,
 };
 use anyhow::Result;
 
@@ -83,6 +84,7 @@ pub struct Node {
     /// Node kind
     pub kind: NodeKind,
     pub tok: Token,
+    pub ty: Option<Arc<Type>>,
     /// Left-hand side
     pub lhs: Option<Box<Node>>,
     /// Right-hand side
@@ -96,6 +98,22 @@ pub struct Node {
     pub inc: Option<Box<Node>>,
 }
 
+fn new_node(kind: NodeKind, tok: Token) -> Node {
+    Node {
+        kind,
+        lhs: None,
+        rhs: None,
+        body: None,
+        cond: None,
+        then: None,
+        els: None,
+        init: None,
+        inc: None,
+        tok,
+        ty: None,
+    }
+}
+
 fn find_var(tok: &Token, locals: &VecDeque<Rc<RefCell<Obj>>>) -> Option<Rc<RefCell<Obj>>> {
     let name = tok.lexeme;
     locals
@@ -105,63 +123,24 @@ fn find_var(tok: &Token, locals: &VecDeque<Rc<RefCell<Obj>>>) -> Option<Rc<RefCe
 }
 
 fn new_binary(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>, tok: Token) -> Node {
-    Node {
-        kind,
-        lhs: lhs.map(Box::new),
-        rhs: rhs.map(Box::new),
-        body: None,
-        cond: None,
-        then: None,
-        els: None,
-        init: None,
-        inc: None,
-        tok,
-    }
+    let mut node = new_node(kind, tok);
+    node.lhs = lhs.map(Box::new);
+    node.rhs = rhs.map(Box::new);
+    node
 }
 
 fn new_unary(kind: NodeKind, expr: Option<Node>, tok: Token) -> Node {
-    Node {
-        kind,
-        lhs: expr.map(Box::new),
-        rhs: None,
-        body: None,
-        cond: None,
-        then: None,
-        els: None,
-        init: None,
-        inc: None,
-        tok,
-    }
+    let mut node = new_node(kind, tok);
+    node.lhs = expr.map(Box::new);
+    node
 }
 
 fn new_num(val: isize, tok: Token) -> Node {
-    Node {
-        kind: NodeKind::Num(val),
-        lhs: None,
-        rhs: None,
-        body: None,
-        cond: None,
-        then: None,
-        els: None,
-        init: None,
-        inc: None,
-        tok,
-    }
+    new_node(NodeKind::Num(val), tok)
 }
 
 fn new_var_node(var: Rc<RefCell<Obj>>, tok: Token) -> Node {
-    Node {
-        kind: NodeKind::Var(var),
-        lhs: None,
-        rhs: None,
-        body: None,
-        cond: None,
-        then: None,
-        els: None,
-        init: None,
-        inc: None,
-        tok,
-    }
+    new_node(NodeKind::Var(var), tok)
 }
 
 fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<RefCell<Obj>> {
@@ -204,18 +183,11 @@ fn stmt(
             } else {
                 None
             };
-            return Ok(Node {
-                kind: NodeKind::If,
-                lhs: None,
-                rhs: None,
-                body: None,
-                cond: cond.map(Box::new),
-                then: then.map(Box::new),
-                els: els.map(Box::new),
-                init: None,
-                inc: None,
-                tok,
-            });
+            let mut node = new_node(NodeKind::If, tok);
+            node.cond = cond.map(Box::new);
+            node.then = then.map(Box::new);
+            node.els = els.map(Box::new);
+            return Ok(node);
         }
 
         if equal(tok, "for") {
@@ -242,18 +214,12 @@ fn stmt(
             skip(tokens, ")")?;
             let then = stmt(tokens, locals)?;
 
-            return Ok(Node {
-                kind: NodeKind::For,
-                lhs: None,
-                rhs: None,
-                body: None,
-                cond: cond.map(Box::new),
-                then: Some(Box::new(then)),
-                els: None,
-                init: Some(Box::new(init)),
-                inc: inc.map(Box::new),
-                tok,
-            });
+            let mut node = new_node(NodeKind::For, tok);
+            node.cond = cond.map(Box::new);
+            node.then = Some(Box::new(then));
+            node.init = Some(Box::new(init));
+            node.inc = inc.map(Box::new);
+            return Ok(node);
         }
 
         if equal(tok, "while") {
@@ -263,18 +229,10 @@ fn stmt(
             skip(tokens, ")")?;
             let then = stmt(tokens, locals)?;
 
-            return Ok(Node {
-                kind: NodeKind::For,
-                lhs: None,
-                rhs: None,
-                body: None,
-                cond: cond.map(Box::new),
-                then: Some(Box::new(then)),
-                els: None,
-                init: None,
-                inc: None,
-                tok,
-            });
+            let mut node = new_node(NodeKind::For, tok);
+            node.cond = cond.map(Box::new);
+            node.then = Some(Box::new(then));
+            return Ok(node);
         }
 
         if equal(tok, "{") {
@@ -295,21 +253,15 @@ fn compound_stmt(
         if equal(tok, "}") {
             break;
         }
-        nodes.push(stmt(tokens, locals)?);
+        let mut node = stmt(tokens, locals)?;
+        add_type(&mut Some(&mut node))?;
+        nodes.push(node);
     }
     let tok = tokens.next().unwrap();
-    Ok(Node {
-        kind: NodeKind::Block,
-        lhs: None,
-        rhs: None,
-        body: Some(nodes.into_iter()),
-        cond: None,
-        then: None,
-        els: None,
-        init: None,
-        inc: None,
-        tok,
-    })
+
+    let mut node = new_node(NodeKind::Block, tok);
+    node.body = Some(nodes.into_iter());
+    Ok(node)
 }
 
 /// expr-stmt = expr? ";"
@@ -320,18 +272,8 @@ fn expr_stmt(
     if let Some(tok) = tokens.peek() {
         if equal(tok, ";") {
             let tok = tokens.next().unwrap();
-            return Ok(Node {
-                kind: NodeKind::Block,
-                lhs: None,
-                rhs: None,
-                body: None,
-                cond: None,
-                then: None,
-                els: None,
-                init: None,
-                inc: None,
-                tok,
-            });
+
+            return Ok(new_node(NodeKind::Block, tok));
         }
     }
     let tok = tokens.peek().unwrap().clone();
@@ -434,6 +376,91 @@ pub fn relational(
     Ok(node)
 }
 
+fn is_integer_type(node: &Option<Node>) -> bool {
+    node.as_ref()
+        .is_some_and(|node| is_integer(node.ty.as_ref()))
+}
+
+fn has_base_type(node: &Option<Node>) -> bool {
+    node.as_ref()
+        .is_some_and(|node| node.ty.as_ref().is_some_and(|ty| ty.base.is_some()))
+}
+
+/// In C, `+` operator is overloaded to perform the pointer arithmetic.
+/// If p is a pointer, p+n adds not n but sizeof(*p)*n to the value of p,
+/// so that p+n points to the location n elements (not bytes) ahead of p.
+/// In other words, we need to scale an integer value before adding to a pointer value.
+/// This function takes care of the scaling.
+pub fn new_add(mut lhs: Option<Node>, mut rhs: Option<Node>, tok: Token) -> Result<Node> {
+    add_type(&mut lhs.as_mut())?;
+    add_type(&mut rhs.as_mut())?;
+
+    if is_integer_type(&lhs) && is_integer_type(&rhs) {
+        return Ok(new_binary(NodeKind::Add, lhs, rhs, tok));
+    }
+
+    if has_base_type(&lhs) && has_base_type(&rhs) {
+        return Err(new_error_tok(&tok, "invalid operands"));
+    }
+
+    // Canonicalize `num + ptr` to `ptr + num`
+    if !has_base_type(&lhs) && has_base_type(&rhs) {
+        std::mem::swap(&mut lhs, &mut rhs);
+    }
+
+    // ptr + num
+    rhs = Some(new_binary(
+        NodeKind::Mul,
+        rhs,
+        Some(new_num(8, tok.clone())),
+        tok.clone(),
+    ));
+    Ok(new_binary(NodeKind::Add, lhs, rhs, tok))
+}
+
+/// Like `+`, `-` is overloaded for the pointer type.
+pub fn new_sub(mut lhs: Option<Node>, mut rhs: Option<Node>, tok: Token) -> Result<Node> {
+    add_type(&mut lhs.as_mut())?;
+    add_type(&mut rhs.as_mut())?;
+
+    // num - num
+    if is_integer_type(&lhs) && is_integer_type(&rhs) {
+        return Ok(new_binary(NodeKind::Sub, lhs, rhs, tok));
+    }
+
+    // ptr - num
+    if has_base_type(&lhs) && is_integer_type(&rhs) {
+        let mut node = new_binary(
+            NodeKind::Mul,
+            rhs,
+            Some(new_num(8, tok.clone())),
+            tok.clone(),
+        );
+        add_type(&mut Some(&mut node))?;
+        rhs = Some(node);
+        let ty = match &lhs {
+            Some(lhs_value) => lhs_value.ty.clone(),
+            None => None,
+        };
+        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok);
+        node.ty = ty;
+        return Ok(node);
+    }
+
+    // ptr - ptr, which returns how many elements are between the two.
+    if has_base_type(&lhs) && has_base_type(&rhs) {
+        let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok.clone());
+        node.ty = Some(TY_INT.clone());
+        return Ok(new_binary(
+            NodeKind::Div,
+            Some(node),
+            Some(new_num(8, tok.clone())),
+            tok,
+        ));
+    }
+    Err(new_error_tok(&tok, "invalid operands"))
+}
+
 /// add = mul ("+" mul | "-" mul)*
 pub fn add(
     tokens: &mut Peekable<IntoIter<Token>>,
@@ -443,12 +470,12 @@ pub fn add(
     while let Some(tok) = tokens.peek() {
         if equal(tok, "+") {
             let tok = tokens.next().unwrap();
-            node = Some(new_binary(NodeKind::Add, node, mul(tokens, locals)?, tok));
+            node = Some(new_add(node, mul(tokens, locals)?, tok)?);
             continue;
         }
         if equal(tok, "-") {
             let tok = tokens.next().unwrap();
-            node = Some(new_binary(NodeKind::Sub, node, mul(tokens, locals)?, tok));
+            node = Some(new_sub(node, mul(tokens, locals)?, tok)?);
             continue;
         }
         break;
