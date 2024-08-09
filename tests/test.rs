@@ -62,11 +62,16 @@ fn test_compiler() -> Result<()> {
     assert_eq!(run("{ return 1>=1; }")?, Some(1));
     assert_eq!(run("{ return 1>=2; }")?, Some(0));
 
-    assert_eq!(run("{ a=3; return a; }")?, Some(3));
-    assert_eq!(run("{ a=3; z=5; return a+z; }")?, Some(8));
-    assert_eq!(run("{ a=b=3; return a+b; }")?, Some(6));
-    assert_eq!(run("{ foo=3; return foo; }")?, Some(3));
-    assert_eq!(run("{ foo123=3; bar=5; return foo123+bar; }")?, Some(8));
+    assert_eq!(run("{ int a; a=3; return a; }")?, Some(3));
+    assert_eq!(run("{ int a=3; return a; }")?, Some(3));
+    assert_eq!(run("{ int a=3; int z=5; return a+z; }")?, Some(8));
+    assert_eq!(run("{ int a=3; return a; }")?, Some(3));
+    assert_eq!(run("{ int a; int b; a=b=3; return a+b; }")?, Some(6));
+    assert_eq!(run("{ int foo=3; return foo; }")?, Some(3));
+    assert_eq!(
+        run("{ int foo123=3; int bar=5; return foo123+bar; }")?,
+        Some(8)
+    );
 
     assert_eq!(run("{ return 1; 2; 3; }")?, Some(1));
     assert_eq!(run("{ 1; return 2; 3; }")?, Some(2));
@@ -89,22 +94,30 @@ fn test_compiler() -> Result<()> {
     );
 
     assert_eq!(
-        run("{ i=0; j=0; for (i=0; i<=10; i=i+1) j=i+j; return j; }")?,
+        run("{ int i=0; int j=0; for (i=0; i<=10; i=i+1) j=i+j; return j; }")?,
         Some(55)
     );
     assert_eq!(run("{ for (;;) {return 3;} return 5; }")?, Some(3));
 
-    assert_eq!(run("{ i=0; while(i<10) i=i+1; return i; }")?, Some(10));
+    assert_eq!(run("{ int i=0; while(i<10) i=i+1; return i; }")?, Some(10));
 
-    assert_eq!(run("{ x=3; return *&x; }")?, Some(3));
-    assert_eq!(run("{ x=3; y=&x; z=&y; return **z; }")?, Some(3));
-    assert_eq!(run("{ x=3; y=5; return *(&x+1); }")?, Some(5));
-    assert_eq!(run("{ x=3; y=5; return *(&y-1); }")?, Some(3));
-    assert_eq!(run("{ x=3; y=5; return *(&x-(-1)); }")?, Some(5));
-    assert_eq!(run("{ x=3; y=&x; *y=5; return x; }")?, Some(5));
-    assert_eq!(run("{ x=3; y=5; *(&x+1)=7; return y; }")?, Some(7));
-    assert_eq!(run("{ x=3; y=5; *(&y-2+1)=7; return x; }")?, Some(7));
-    assert_eq!(run("{ x=3; return (&x+2)-&x+3; }")?, Some(5));
+    assert_eq!(run("{ int x=3; return *&x; }")?, Some(3));
+    assert_eq!(
+        run("{ int x=3; int *y=&x; int **z=&y; return **z; }")?,
+        Some(3)
+    );
+    assert_eq!(run("{ int x=3; int y=5; return *(&x+1); }")?, Some(5));
+    assert_eq!(run("{ int x=3; int y=5; return *(&y-1); }")?, Some(3));
+    assert_eq!(run("{ int x=3; int y=5; return *(&x-(-1)); }")?, Some(5));
+    assert_eq!(run("{ int x=3; int *y=&x; *y=5; return x; }")?, Some(5));
+    assert_eq!(run("{ int x=3; int y=5; *(&x+1)=7; return y; }")?, Some(7));
+    assert_eq!(
+        run("{ int x=3; int y=5; *(&y-2+1)=7; return x; }")?,
+        Some(7)
+    );
+    assert_eq!(run("{ int x=3; return (&x+2)-&x+3; }")?, Some(5));
+    assert_eq!(run("{ int x, y; x=3; y=5; return x+y; }")?, Some(8));
+    assert_eq!(run("{ int x=3, y=5; return x+y; }")?, Some(8));
 
     Ok(())
 }
