@@ -17,7 +17,7 @@ pub enum TokenKind {
 }
 
 /// Token type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,      // Token kind
     pub pos: usize,           // Token location
@@ -39,6 +39,10 @@ pub fn new_error_tok(tok: &Token, message: &str) -> Error {
     new_error_at(tok.pos, message)
 }
 
+pub fn new_error_et() -> Error {
+    new_error_at(current_input().len(), "expected token")
+}
+
 /// Consumes the current token if it matches `op`
 pub fn equal(token: &Token, op: &str) -> bool {
     token.lexeme == op
@@ -47,13 +51,23 @@ pub fn equal(token: &Token, op: &str) -> bool {
 /// Ensure that the current token is `op`
 pub fn skip(tokens: &mut Peekable<IntoIter<Token>>, op: &str) -> Result<()> {
     let Some(tok) = tokens.peek() else {
-        return Err(new_error_at(current_input().len(), "expected token"));
+        return Err(new_error_et());
     };
     if !equal(tok, op) {
         return Err(new_error_tok(tok, &format!("expected '{op}'")));
     }
     tokens.next();
     Ok(())
+}
+
+pub fn consume(tokens: &mut Peekable<IntoIter<Token>>, op: &str) -> bool {
+    if let Some(tok) = tokens.peek() {
+        if equal(tok, op) {
+            tokens.next();
+            return true;
+        }
+    }
+    false
 }
 
 /// Create a new token
@@ -81,7 +95,7 @@ fn read_punct(input: &str) -> Option<usize> {
     }
 }
 
-const KW: &[&str] = &["return", "if", "else", "for", "while"];
+const KW: &[&str] = &["return", "if", "else", "for", "while", "int"];
 
 fn is_keyword(tok: &Token) -> bool {
     KW.iter().any(|&k| equal(tok, k))

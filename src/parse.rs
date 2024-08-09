@@ -15,7 +15,7 @@
 use std::{cell::RefCell, collections::VecDeque, iter::Peekable, rc::Rc, sync::Arc, vec::IntoIter};
 
 use crate::{
-    add_type, current_input, is_integer, new_error_at, new_error_tok,
+    add_type, consume, is_integer, new_error_et, new_error_tok, pointer_to,
     tokenize::{equal, skip, Token, TokenKind},
     Type, TY_INT,
 };
@@ -25,6 +25,8 @@ use anyhow::Result;
 pub struct Obj {
     /// Variable name
     pub name: &'static str,
+    // Type
+    pub ty: Option<Arc<Type>>,
     /// Offset from RBP
     pub offset: isize,
 }
@@ -143,10 +145,101 @@ fn new_var_node(var: Rc<RefCell<Obj>>, tok: Token) -> Node {
     new_node(NodeKind::Var(var), tok)
 }
 
-fn new_lvar(name: &'static str, locals: &mut VecDeque<Rc<RefCell<Obj>>>) -> Rc<RefCell<Obj>> {
-    let obj = Rc::new(RefCell::new(Obj { name, offset: 0 }));
+fn new_lvar(
+    name: &'static str,
+    locals: &mut VecDeque<Rc<RefCell<Obj>>>,
+    ty: Arc<Type>,
+) -> Rc<RefCell<Obj>> {
+    let obj = Rc::new(RefCell::new(Obj {
+        name,
+        offset: 0,
+        ty: Some(ty.clone()),
+    }));
     locals.push_back(Rc::clone(&obj));
     obj
+}
+
+fn get_ident(tok: &Token) -> Result<&'static str> {
+    let TokenKind::Ident = tok.kind else {
+        return Err(new_error_tok(tok, "expected an identifier"));
+    };
+    Ok(tok.lexeme)
+}
+
+/// declspec = "int"
+fn declspec(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Arc<Type>> {
+    skip(tokens, "int")?;
+    Ok(TY_INT.clone())
+}
+
+/// declarator = "*"* ident
+fn declarator(tokens: &mut Peekable<IntoIter<Token>>, ty: &Arc<Type>) -> Result<Arc<Type>> {
+    let mut ty = (**ty).clone();
+    while consume(tokens, "*") {
+        ty = pointer_to(Some(&Arc::new(ty)));
+    }
+
+    let Some(tok) = tokens.next() else {
+        return Err(new_error_et());
+    };
+    if tok.kind != TokenKind::Ident {
+        return Err(new_error_tok(&tok, "expected a variable name"));
+    };
+
+    ty.name = Some(Box::new(tok));
+    Ok(Arc::new(ty))
+}
+
+/// declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)* ";"
+pub fn declaration(
+    tokens: &mut Peekable<IntoIter<Token>>,
+    locals: &mut VecDeque<Rc<RefCell<Obj>>>,
+) -> Result<Node> {
+    let basety = declspec(tokens)?;
+
+    let mut nodes = Vec::new();
+
+    let mut i = 0;
+
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, ";") {
+            break;
+        }
+        if i > 0 {
+            skip(tokens, ",")?;
+        }
+        i += 1;
+
+        let ty = declarator(tokens, &basety)?;
+        let Some(ntok) = &ty.clone().name else {
+            return Err(new_error_et());
+        };
+        let var = new_lvar(get_ident(ntok)?, locals, ty);
+
+        let Some(tok) = tokens.peek() else {
+            return Err(new_error_et());
+        };
+
+        if !equal(tok, "=") {
+            continue;
+        }
+
+        let lhs = Some(new_var_node(var, (**ntok).clone()));
+        tokens.next();
+        let rhs = assign(tokens, locals)?;
+        let Some(tok) = tokens.peek() else {
+            return Err(new_error_et());
+        };
+        let node = new_binary(NodeKind::Assign, lhs, rhs, tok.clone());
+        nodes.push(new_unary(NodeKind::ExprStmt, Some(node), tok.clone()));
+    }
+
+    let Some(tok) = tokens.next() else {
+        return Err(new_error_et());
+    };
+    let mut node = new_node(NodeKind::Block, tok);
+    node.body = Some(nodes.into_iter());
+    Ok(node)
 }
 
 /// stmt = "return" expr ";"
@@ -195,7 +288,7 @@ fn stmt(
             skip(tokens, "(")?;
             let init = expr_stmt(tokens, locals)?;
             let Some(maby_cond) = tokens.peek() else {
-                return Err(new_error_at(current_input().len(), "expected token"));
+                return Err(new_error_et());
             };
             let cond = if equal(maby_cond, ";") {
                 None
@@ -204,7 +297,7 @@ fn stmt(
             };
             skip(tokens, ";")?;
             let Some(maby_inc) = tokens.peek() else {
-                return Err(new_error_at(current_input().len(), "expected token"));
+                return Err(new_error_et());
             };
             let inc = if equal(maby_inc, ")") {
                 None
@@ -253,9 +346,13 @@ fn compound_stmt(
         if equal(tok, "}") {
             break;
         }
-        let mut node = stmt(tokens, locals)?;
-        add_type(&mut Some(&mut node))?;
-        nodes.push(node);
+        if equal(tok, "int") {
+            nodes.push(declaration(tokens, locals)?);
+        } else {
+            let mut node = stmt(tokens, locals)?;
+            add_type(&mut Some(&mut node))?;
+            nodes.push(node);
+        }
     }
     let tok = tokens.next().unwrap();
 
@@ -566,7 +663,7 @@ pub fn primary(
         let var = if let Some(var) = find_var(tok, locals) {
             var
         } else {
-            new_lvar(tok.lexeme, locals)
+            return Err(new_error_tok(tok, "undefined variable"));
         };
         let tok = tokens.next().unwrap();
         let node = new_var_node(var, tok);
