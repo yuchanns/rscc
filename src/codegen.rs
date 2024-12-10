@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicIsize, Ordering::SeqCst},
-    OnceLock,
+use std::{
+    sync::{
+        atomic::{AtomicIsize, Ordering::SeqCst},
+        OnceLock,
+    },
+    vec::IntoIter,
 };
 
 use anyhow::Result;
@@ -144,7 +147,7 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     Ok(())
 }
 
-fn gen_stmt(node: &Node) -> Result<()> {
+fn gen_stmt(node: &Node, current_f: &Function) -> Result<()> {
     match node.kind {
         NodeKind::If => {
             let c = current_count().fetch_add(1, SeqCst);
@@ -154,11 +157,11 @@ fn gen_stmt(node: &Node) -> Result<()> {
             let Some(then) = &node.then else {
                 return Err(new_error_tok(&node.tok, "expected then clause"));
             };
-            gen_stmt(then)?;
+            gen_stmt(then, current_f)?;
             println!("  b .L.end.{c}");
             println!(".L.else.{c}:");
             if let Some(els) = &node.els {
-                gen_stmt(els)?;
+                gen_stmt(els, current_f)?;
             };
             println!(".L.end.{c}:");
             Ok(())
@@ -166,7 +169,7 @@ fn gen_stmt(node: &Node) -> Result<()> {
         NodeKind::For => {
             let c = current_count().fetch_add(1, SeqCst);
             if let Some(init) = &node.init {
-                gen_stmt(init)?;
+                gen_stmt(init, current_f)?;
             }
             println!(".L.begin.{c}:");
             gen_expr(node.cond.as_deref())?;
@@ -175,7 +178,7 @@ fn gen_stmt(node: &Node) -> Result<()> {
             let Some(then) = &node.then else {
                 return Err(new_error_tok(&node.tok, "expected then clause"));
             };
-            gen_stmt(then)?;
+            gen_stmt(then, current_f)?;
             gen_expr(node.inc.as_deref())?;
             println!("  b .L.begin.{c}");
             println!(".L.end.{c}:");
@@ -184,14 +187,14 @@ fn gen_stmt(node: &Node) -> Result<()> {
         NodeKind::Block => {
             if let Some(nodes) = &node.body {
                 for node in nodes.as_slice() {
-                    gen_stmt(node)?;
+                    gen_stmt(node, current_f)?;
                 }
             }
             Ok(())
         }
         NodeKind::Return => {
             gen_expr(node.lhs.as_deref())?;
-            println!("  b .L.return");
+            println!("  b .L.return.{}", current_f.name);
             Ok(())
         }
         NodeKind::ExprStmt => gen_expr(node.lhs.as_deref()),
@@ -199,43 +202,48 @@ fn gen_stmt(node: &Node) -> Result<()> {
     }
 }
 
-fn assign_lvar_offsets(prog: &mut Function) {
-    let mut offset = 0;
-    while let Some(var) = prog.locals.pop() {
-        offset += 8;
-        var.as_ref().borrow_mut().offset = offset;
+fn assign_lvar_offsets(prog: &mut IntoIter<Function>) {
+    for f in prog.as_mut_slice() {
+        let mut offset = 0;
+        while let Some(var) = f.locals.pop() {
+            offset += 8;
+            var.as_ref().borrow_mut().offset = offset;
+        }
+        f.stack_size = align_to(offset, 16);
     }
-    prog.stack_size = align_to(offset, 16);
 }
 
-pub fn codegen(prog: &mut Function) -> Result<()> {
+pub fn codegen(prog: &mut IntoIter<Function>) -> Result<()> {
     assign_lvar_offsets(prog);
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        println!("  .global main");
-        println!("main:");
-    }
-    #[cfg(target_os = "macos")]
-    {
-        println!("  .global _main");
-        println!("_main:");
-    }
+    for f in prog.as_slice() {
+        #[cfg(not(target_os = "macos"))]
+        {
+            println!("  .global {}", f.name);
+            println!("{}:", f.name);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            println!(".global _{}", f.name);
+            println!("_{}:", f.name);
+        }
+        // Prologue
+        println!("  stp x29, x30, [sp, #-16]!");
+        println!("  mov x29, sp");
+        println!("  sub sp, sp, #{}", f.stack_size);
 
-    // Prologue
-    println!("  stp x29, x30, [sp, #-16]!");
-    println!("  mov x29, sp");
-    println!("  sub sp, sp, #{}", prog.stack_size);
+        for node in f.body.as_slice() {
+            // Emit code
+            gen_stmt(node, f)?;
+            assert_eq!(current_depth().load(SeqCst), 0);
+        }
 
-    for node in prog.body.as_slice() {
-        gen_stmt(node)?;
-        assert_eq!(current_depth().load(SeqCst), 0);
+        // Epilogue
+        println!(".L.return.{}:", f.name);
+        println!("  mov sp, x29");
+        println!("  ldp x29, x30, [sp], #16");
+        println!("  ret");
     }
-
-    println!(".L.return:");
-    println!("  mov sp, x29");
-    println!("  ldp x29, x30, [sp], #16");
-    println!("  ret");
 
     Ok(())
 }

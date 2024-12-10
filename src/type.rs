@@ -3,26 +3,29 @@ use std::sync::{Arc, LazyLock};
 use crate::{new_error_tok, Node, NodeKind, Token};
 use anyhow::Result;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum TypeKind {
+    #[default]
     Int,
     Ptr,
+    Func,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Type {
     pub kind: TypeKind,
     /// Pointer
     pub base: Option<Arc<Type>>,
     /// Declaration
     pub name: Option<Box<Token>>,
+    /// Function type
+    pub return_ty: Option<Arc<Type>>,
 }
 
 pub static TY_INT: LazyLock<Arc<Type>> = LazyLock::new(|| {
     Arc::new(Type {
         kind: TypeKind::Int,
-        base: None,
-        name: None,
+        ..Default::default()
     })
 });
 
@@ -39,7 +42,15 @@ pub fn pointer_to(base: Option<&Arc<Type>>) -> Type {
     Type {
         kind: TypeKind::Ptr,
         base: base.cloned(),
-        name: None,
+        ..Default::default()
+    }
+}
+
+pub fn func_type(return_ty: Arc<Type>) -> Type {
+    Type {
+        kind: TypeKind::Func,
+        return_ty: Some(return_ty),
+        ..Default::default()
     }
 }
 

@@ -15,7 +15,7 @@
 use std::{cell::RefCell, iter::Peekable, rc::Rc, sync::Arc, vec::IntoIter};
 
 use crate::{
-    add_type, consume, is_integer, new_error_et, new_error_tok, pointer_to,
+    add_type, consume, func_type, is_integer, new_error_et, new_error_tok, pointer_to,
     tokenize::{equal, skip, Token, TokenKind},
     Type, TY_INT,
 };
@@ -33,6 +33,7 @@ pub struct Obj {
 
 #[derive(Debug)]
 pub struct Function {
+    pub name: &'static str,
     pub body: IntoIter<Node>,
     pub locals: Vec<Rc<RefCell<Obj>>>,
     pub stack_size: isize,
@@ -171,6 +172,18 @@ fn declspec(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Arc<Type>> {
     Ok(TY_INT.clone())
 }
 
+// type-suffix = ("(" func-params)?
+fn type_suffix(tokens: &mut Peekable<IntoIter<Token>>, ty: Type) -> Result<Type> {
+    if let Some(tok) = tokens.peek() {
+        if equal(tok, "(") {
+            tokens.next();
+            skip(tokens, ")")?;
+            return Ok(func_type(Arc::new(ty)));
+        }
+    }
+    Ok(ty)
+}
+
 /// declarator = "*"* ident
 fn declarator(tokens: &mut Peekable<IntoIter<Token>>, ty: &Arc<Type>) -> Result<Arc<Type>> {
     let mut ty = (**ty).clone();
@@ -184,6 +197,8 @@ fn declarator(tokens: &mut Peekable<IntoIter<Token>>, ty: &Arc<Type>) -> Result<
     if tok.kind != TokenKind::Ident {
         return Err(new_error_tok(&tok, "expected a variable name"));
     };
+
+    let mut ty = type_suffix(tokens, ty)?;
 
     ty.name = Some(Box::new(tok));
     Ok(Arc::new(ty))
@@ -649,7 +664,7 @@ pub fn unary(
 pub fn funcall(
     start: Token,
     tokens: &mut Peekable<IntoIter<Token>>,
-    locals: &mut VecDeque<Rc<RefCell<Obj>>>,
+    locals: &mut Vec<Rc<RefCell<Obj>>>,
 ) -> Result<Node> {
     tokens.next();
     let mut args = Vec::new();
@@ -710,16 +725,31 @@ pub fn primary(
     Err(new_error_tok(tok, "expected an expression"))
 }
 
-/// program = stmt*
-pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
+pub fn function(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
+    let ty = declspec(tokens)?;
+    let ty = declarator(tokens, &ty)?;
     skip(tokens, "{")?;
-    let mut nodes = Vec::new();
+    let Some(name) = &ty.name else {
+        return Err(new_error_et());
+    };
     let mut locals = Vec::new();
-    nodes.push(compound_stmt(tokens, &mut locals)?);
 
     Ok(Function {
-        body: nodes.into_iter(),
+        name: get_ident(name)?,
+        body: vec![compound_stmt(tokens, &mut locals)?].into_iter(),
         locals,
         stack_size: 0,
     })
+}
+
+/// program = function-definition*
+pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<IntoIter<Function>> {
+    let mut functions = Vec::new();
+    while let Some(tok) = tokens.peek() {
+        if tok.kind == TokenKind::Eof {
+            break;
+        }
+        functions.push(function(tokens)?);
+    }
+    Ok(functions.into_iter())
 }
