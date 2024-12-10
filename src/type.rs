@@ -80,7 +80,12 @@ pub fn add_type(node: &mut Option<&mut Node>) -> Result<()> {
             node.ty = lhs.ty.clone();
             Ok(())
         }
-        NodeKind::Eq | NodeKind::Ne | NodeKind::Lt | NodeKind::Le | NodeKind::Num(_) => {
+        NodeKind::Eq
+        | NodeKind::Ne
+        | NodeKind::Lt
+        | NodeKind::Le
+        | NodeKind::Num(_)
+        | NodeKind::FunCall(_) => {
             node.ty = Some(TY_INT.clone());
             Ok(())
         }

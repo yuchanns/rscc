@@ -1,8 +1,34 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::{fs, io::Write, process::Command};
 
 fn run(input: &str) -> Result<Option<i32>> {
-    let output = Command::new("target/debug/rscc").arg(input).output()?;
+    let tmp2 = "target/debug/tmp2.o";
+    let mut child = Command::new("gcc")
+        .args(["-xc", "-c", "-o", tmp2, "-"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(b"int ret3() { return 3; }\nint ret5() { return 5; }\n")?;
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "failed to compile tmp2.o:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        ));
+    }
+
+    let child = Command::new("target/debug/rscc")
+        .args([input])
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "failed to compile:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        ));
+    }
 
     let asm = String::from_utf8_lossy(&output.stdout);
 
@@ -14,12 +40,12 @@ fn run(input: &str) -> Result<Option<i32>> {
 
     #[cfg(not(target_os = "macos"))]
     assert!(Command::new("gcc")
-        .args(["-static", "-o", tmp, tmpdots])
+        .args(["-static", "-o", tmp, tmpdots, tmp2])
         .status()?
         .success());
     #[cfg(target_os = "macos")]
     assert!(Command::new("gcc")
-        .args(["-o", tmp, tmpdots])
+        .args(["-o", tmp, tmpdots, tmp2])
         .status()?
         .success());
 
@@ -118,6 +144,9 @@ fn test_compiler() -> Result<()> {
     assert_eq!(run("{ int x=3; return (&x+2)-&x+3; }")?, Some(5));
     assert_eq!(run("{ int x, y; x=3; y=5; return x+y; }")?, Some(8));
     assert_eq!(run("{ int x=3, y=5; return x+y; }")?, Some(8));
+
+    assert_eq!(run("{ return ret3(); }")?, Some(3));
+    assert_eq!(run("{ return ret5(); }")?, Some(5));
 
     Ok(())
 }

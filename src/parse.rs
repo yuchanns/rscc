@@ -72,6 +72,8 @@ pub enum NodeKind {
     For,
     /// { ... }
     Block,
+    /// Function call
+    FunCall(&'static str),
     /// Expression statement
     ExprStmt,
     /// Veriable
@@ -646,7 +648,8 @@ pub fn unary(
     primary(tokens, locals)
 }
 
-/// primary = "(" expr ")" | ident | num
+/// primary = "(" expr ")" | ident args? | num
+/// args = "(" ")"
 pub fn primary(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
@@ -660,12 +663,22 @@ pub fn primary(
         skip(tokens, ")")?;
         return Ok(node);
     } else if let TokenKind::Ident = tok.kind {
-        let var = if let Some(var) = find_var(tok, locals) {
+        let tok = tokens.next().unwrap();
+        // Function call
+        if let Some(next) = tokens.peek() {
+            if equal(next, "(") {
+                let node = new_node(NodeKind::FunCall(tok.lexeme), tok);
+                tokens.next();
+                skip(tokens, ")")?;
+                return Ok(Some(node));
+            }
+        }
+        // Variable
+        let var = if let Some(var) = find_var(&tok, locals) {
             var
         } else {
-            return Err(new_error_tok(tok, "undefined variable"));
+            return Err(new_error_tok(&tok, "undefined variable"));
         };
-        let tok = tokens.next().unwrap();
         let node = new_var_node(var, tok);
         return Ok(Some(node));
     } else if let TokenKind::Num(num) = tok.kind {

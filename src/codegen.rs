@@ -88,6 +88,17 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
         pop("x1");
         println!("  str x0, [x1]");
         return Ok(());
+    } else if let NodeKind::FunCall(funcname) = node.kind {
+        println!("  mov x0, #0");
+        #[cfg(not(target_os = "macos"))]
+        {
+            println!("  bl {}", funcname);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            println!("  bl _{}", funcname);
+        }
+        return Ok(());
     }
     gen_expr(node.rhs.as_deref())?;
     push();
