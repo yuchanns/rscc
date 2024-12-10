@@ -8,7 +8,16 @@ fn run(input: &str) -> Result<Option<i32>> {
         .stdin(std::process::Stdio::piped())
         .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(b"int ret3() { return 3; }\nint ret5() { return 5; }\n")?;
+        stdin.write_all(
+            br#"int ret3() { return 3; }
+            int ret5() { return 5; }
+            int add(int x, int y) { return x + y; }
+            int sub(int x, int y) { return x - y; }
+            int add6(int a, int b, int c, int d, int e, int f) {
+                return a+b+c+d+e+f;
+            }
+            "#,
+        )?;
     }
     let output = child.wait_with_output()?;
     if !output.status.success() {
@@ -147,6 +156,17 @@ fn test_compiler() -> Result<()> {
 
     assert_eq!(run("{ return ret3(); }")?, Some(3));
     assert_eq!(run("{ return ret5(); }")?, Some(5));
+    assert_eq!(run("{ return add(3,5); }")?, Some(8));
+    assert_eq!(run("{ return sub(5,3); }")?, Some(2));
+    assert_eq!(run("{ return add6(1,2,3,4,5,6); }")?, Some(21));
+    assert_eq!(
+        run("{ return add6(1,2,add6(3,4,5,6,7,8),9,10,11); }")?,
+        Some(66)
+    );
+    assert_eq!(
+        run("{ return add6(1,2,add6(3,add6(4,5,6,7,8,9),10,11,12,13),14,15,16); }")?,
+        Some(136)
+    );
 
     Ok(())
 }

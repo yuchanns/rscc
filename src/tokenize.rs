@@ -2,7 +2,7 @@ use std::{iter::Peekable, mem::take, sync::OnceLock, vec::IntoIter};
 
 use anyhow::{anyhow, Error, Result};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum TokenKind {
     /// Identifiers
     Ident,
@@ -13,11 +13,12 @@ pub enum TokenKind {
     /// Numeric literal
     Num(isize),
     /// End-of-file markers
+    #[default]
     Eof,
 }
 
 /// Token type
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Token {
     pub kind: TokenKind,      // Token kind
     pub pos: usize,           // Token location

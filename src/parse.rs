@@ -38,7 +38,7 @@ pub struct Function {
     pub stack_size: isize,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub enum NodeKind {
     /// +
     Add,
@@ -65,6 +65,7 @@ pub enum NodeKind {
     /// unary *
     Deref,
     /// "return"
+    #[default]
     Return,
     /// "if"
     If,
@@ -83,7 +84,7 @@ pub enum NodeKind {
 }
 
 /// AST node type
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Node {
     /// Node kind
     pub kind: NodeKind,
@@ -93,28 +94,24 @@ pub struct Node {
     pub lhs: Option<Box<Node>>,
     /// Right-hand side
     pub rhs: Option<Box<Node>>,
-    pub body: Option<IntoIter<Node>>,
     /// "if" or "for" statement
     pub cond: Option<Box<Node>>,
     pub then: Option<Box<Node>>,
     pub els: Option<Box<Node>>,
     pub init: Option<Box<Node>>,
     pub inc: Option<Box<Node>>,
+
+    /// Block
+    pub body: Option<IntoIter<Node>>,
+
+    pub args: Option<IntoIter<Node>>,
 }
 
 fn new_node(kind: NodeKind, tok: Token) -> Node {
     Node {
         kind,
-        lhs: None,
-        rhs: None,
-        body: None,
-        cond: None,
-        then: None,
-        els: None,
-        init: None,
-        inc: None,
         tok,
-        ty: None,
+        ..Default::default()
     }
 }
 
@@ -648,6 +645,32 @@ pub fn unary(
     primary(tokens, locals)
 }
 
+/// funcall = ident "(" (assign ("," assign)*)? ")"
+pub fn funcall(
+    start: Token,
+    tokens: &mut Peekable<IntoIter<Token>>,
+    locals: &mut VecDeque<Rc<RefCell<Obj>>>,
+) -> Result<Node> {
+    tokens.next();
+    let mut args = Vec::new();
+
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, ")") {
+            skip(tokens, ")")?;
+            break;
+        }
+        if !args.is_empty() {
+            skip(tokens, ",")?;
+        }
+        if let Some(arg) = assign(tokens, locals)? {
+            args.push(arg);
+        }
+    }
+    let mut node = new_node(NodeKind::FunCall(start.lexeme), start);
+    node.args = Some(args.into_iter());
+    Ok(node)
+}
+
 /// primary = "(" expr ")" | ident args? | num
 /// args = "(" ")"
 pub fn primary(
@@ -667,10 +690,7 @@ pub fn primary(
         // Function call
         if let Some(next) = tokens.peek() {
             if equal(next, "(") {
-                let node = new_node(NodeKind::FunCall(tok.lexeme), tok);
-                tokens.next();
-                skip(tokens, ")")?;
-                return Ok(Some(node));
+                return Ok(Some(funcall(tok, tokens, locals)?));
             }
         }
         // Variable

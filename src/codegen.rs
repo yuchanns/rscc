@@ -15,6 +15,8 @@ static GLOBAL_DEPTH: OnceLock<AtomicIsize> = OnceLock::new();
 
 static GLOBAL_COUNT: OnceLock<AtomicIsize> = OnceLock::new();
 
+static ARGREGS: [&str; 6] = ["x0", "x1", "x2", "x3", "x4", "x5"];
+
 fn current_depth() -> &'static AtomicIsize {
     GLOBAL_DEPTH.get_or_init(|| AtomicIsize::new(0))
 }
@@ -89,7 +91,15 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
         println!("  str x0, [x1]");
         return Ok(());
     } else if let NodeKind::FunCall(funcname) = node.kind {
-        println!("  mov x0, #0");
+        if let Some(args) = &node.args {
+            for arg in args.as_slice() {
+                gen_expr(Some(arg))?;
+                push();
+            }
+            for i in (0..args.len()).rev() {
+                pop(ARGREGS[i]);
+            }
+        }
         #[cfg(not(target_os = "macos"))]
         {
             println!("  bl {}", funcname);
