@@ -34,6 +34,7 @@ pub struct Obj {
 #[derive(Debug)]
 pub struct Function {
     pub name: &'static str,
+    pub params: Option<Vec<Rc<RefCell<Obj>>>>,
     pub body: IntoIter<Node>,
     pub locals: Vec<Rc<RefCell<Obj>>>,
     pub stack_size: isize,
@@ -172,13 +173,29 @@ fn declspec(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Arc<Type>> {
     Ok(TY_INT.clone())
 }
 
-// type-suffix = ("(" func-params)?
+// type-suffix = ("(" func-params)? ")")?
+// func-params = param ("," param)*
+// param = declspec declarator
 fn type_suffix(tokens: &mut Peekable<IntoIter<Token>>, ty: Type) -> Result<Type> {
     if let Some(tok) = tokens.peek() {
         if equal(tok, "(") {
             tokens.next();
+            let mut types = Vec::new();
+            while let Some(tok) = tokens.peek() {
+                if equal(tok, ")") {
+                    break;
+                }
+                if !types.is_empty() {
+                    skip(tokens, ",")?;
+                }
+                let basety = declspec(tokens)?;
+                let ty = declarator(tokens, &basety)?;
+                types.push(ty);
+            }
             skip(tokens, ")")?;
-            return Ok(func_type(Arc::new(ty)));
+            let mut ty = func_type(Arc::new(ty));
+            ty.params = Some(types);
+            return Ok(ty);
         }
     }
     Ok(ty)
@@ -725,6 +742,17 @@ pub fn primary(
     Err(new_error_tok(tok, "expected an expression"))
 }
 
+fn create_param_lvars(params: &[Arc<Type>], locals: &mut Vec<Rc<RefCell<Obj>>>) -> Result<()> {
+    for param in params.iter() {
+        let Some(ntok) = &param.name else {
+            continue;
+        };
+
+        new_lvar(get_ident(ntok)?, locals, param.clone());
+    }
+    Ok(())
+}
+
 pub fn function(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
     let ty = declspec(tokens)?;
     let ty = declarator(tokens, &ty)?;
@@ -733,9 +761,14 @@ pub fn function(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
         return Err(new_error_et());
     };
     let mut locals = Vec::new();
+    if let Some(params) = &ty.params {
+        create_param_lvars(params, &mut locals)?;
+    }
+    let params = &locals[0..locals.len()];
 
     Ok(Function {
         name: get_ident(name)?,
+        params: Some(params.to_vec()),
         body: vec![compound_stmt(tokens, &mut locals)?].into_iter(),
         locals,
         stack_size: 0,

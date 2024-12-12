@@ -202,6 +202,18 @@ fn test_compiler() -> Result<()> {
         run("int main() { return ret32(); } int ret32() { return 32; }")?,
         Some(32)
     );
+    assert_eq!(
+        run("int main() { return add2(3,4); } int add2(int x,int y) { return x+y; }")?,
+        Some(7)
+    );
+    assert_eq!(
+        run("int main() { return sub2(4,3); } int sub2(int x,int y) { return x-y; }")?,
+        Some(1)
+    );
+    assert_eq!(
+        run("int main() { return fib(9); } int fib(int x) { if (x<=1) return 1; return fib(x-1) + fib(x-2); }")?,
+        Some(55)
+    );
 
     Ok(())
 }

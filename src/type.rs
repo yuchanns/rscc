@@ -20,6 +20,8 @@ pub struct Type {
     pub name: Option<Box<Token>>,
     /// Function type
     pub return_ty: Option<Arc<Type>>,
+    pub params: Option<Vec<Arc<Type>>>,
+    pub next: Option<Arc<Type>>,
 }
 
 pub static TY_INT: LazyLock<Arc<Type>> = LazyLock::new(|| {
@@ -74,6 +76,11 @@ pub fn add_type(node: &mut Option<&mut Node>) -> Result<()> {
         let mut nodes = body.collect::<Vec<_>>();
         for node in &mut nodes {
             add_type(&mut Some(node))?;
+        }
+        if let Some(args) = node.args.as_mut() {
+            for arg in args.as_mut_slice() {
+                add_type(&mut Some(arg))?;
+            }
         }
         node.body = Some(nodes.into_iter());
     }

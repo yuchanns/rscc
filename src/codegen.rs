@@ -232,6 +232,16 @@ pub fn codegen(prog: &mut IntoIter<Function>) -> Result<()> {
         println!("  mov x29, sp");
         println!("  sub sp, sp, #{}", f.stack_size);
 
+        if let Some(args) = &f.params {
+            for (i, var) in args.iter().enumerate() {
+                println!(
+                    "  str {}, [x29, #-{}]",
+                    ARGREGS[i],
+                    var.as_ref().borrow().offset
+                );
+            }
+        }
+
         for node in f.body.as_slice() {
             // Emit code
             gen_stmt(node, f)?;
