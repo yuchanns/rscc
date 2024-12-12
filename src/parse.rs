@@ -676,7 +676,7 @@ pub fn mul(
 }
 
 /// unary = ("+" | "-" | "*" | "&") unary
-///       | primary
+///       | postfix
 pub fn unary(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
@@ -704,7 +704,29 @@ pub fn unary(
             tok,
         )));
     }
-    primary(tokens, locals)
+    postfix(tokens, locals)
+}
+
+/// postfix = primary ("[" expr "]")*
+pub fn postfix(
+    tokens: &mut Peekable<IntoIter<Token>>,
+    locals: &mut Vec<Rc<RefCell<Obj>>>,
+) -> Result<Option<Node>> {
+    let mut node = primary(tokens, locals)?;
+    while let Some(tok) = tokens.peek() {
+        if !equal(tok, "[") {
+            break;
+        }
+        let start = tokens.next().unwrap();
+        let idx = expr(tokens, locals)?;
+        skip(tokens, "]")?;
+        node = Some(new_unary(
+            NodeKind::Deref,
+            Some(new_add(node, idx, start.clone())?),
+            start,
+        ));
+    }
+    Ok(node)
 }
 
 /// funcall = ident "(" (assign ("," assign)*)? ")"

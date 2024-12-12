@@ -256,5 +256,52 @@ fn test_compiler() -> Result<()> {
         run("int main() { int x[2][3]; int *y=x; *(y+5)=5; return *(*(x+1)+2); }")?,
         Some(5)
     );
+
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; x[1]=4; x[2]=5; return *x; }")?,
+        Some(3)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; x[1]=4; x[2]=5; return *(x+1); }")?,
+        Some(4)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; x[1]=4; x[2]=5; return *(x+2); }")?,
+        Some(5)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; x[1]=4; x[2]=5; return *(x+2); }")?,
+        Some(5)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; x[1]=4; 2[x]=5; return *(x+2); }")?,
+        Some(5)
+    );
+
+    assert_eq!(
+        run("int main() { int x[2][3]; int *y=x; y[0]=0; return x[0][0]; }")?,
+        Some(0)
+    );
+    assert_eq!(
+        run("int main() { int x[2][3]; int *y=x; y[1]=1; return x[0][1]; }")?,
+        Some(1)
+    );
+    assert_eq!(
+        run("int main() { int x[2][3]; int *y=x; y[2]=2; return x[0][2]; }")?,
+        Some(2)
+    );
+    assert_eq!(
+        run("int main() { int x[2][3]; int *y=x; y[3]=3; return x[1][0]; }")?,
+        Some(3)
+    );
+    assert_eq!(
+        run("int main() { int x[2][3]; int *y=x; y[4]=4; return x[1][1]; }")?,
+        Some(4)
+    );
+    assert_eq!(
+        run("int main() { int x[2][3]; int *y=x; y[5]=5; return x[1][2]; }")?,
+        Some(5)
+    );
+
     Ok(())
 }
