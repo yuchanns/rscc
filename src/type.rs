@@ -9,15 +9,27 @@ pub enum TypeKind {
     Int,
     Ptr,
     Func,
+    Array,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Type {
     pub kind: TypeKind,
-    /// Pointer
+    /// sizeof() value
+    pub size: usize,
+    /// Pointer-to or array-of type. We intentionally use the same member
+    /// to represent pointer/array duality in C.
+    ///
+    /// In many contexts in which a pointer is expected, we examine this
+    /// member instead of "kind" member to determine whether a type is a
+    /// pointer or not. That means in many contexts "array of T" is
+    /// naturally handled as if it were "pointer to T", as required by
+    /// the C spec.
     pub base: Option<Arc<Type>>,
     /// Declaration
     pub name: Option<Box<Token>>,
+    /// Array
+    pub array_len: Option<usize>,
     /// Function type
     pub return_ty: Option<Arc<Type>>,
     pub params: Option<Vec<Arc<Type>>>,
@@ -27,6 +39,7 @@ pub struct Type {
 pub static TY_INT: LazyLock<Arc<Type>> = LazyLock::new(|| {
     Arc::new(Type {
         kind: TypeKind::Int,
+        size: 8,
         ..Default::default()
     })
 });
@@ -43,6 +56,7 @@ pub fn is_integer(ty: Option<&Arc<Type>>) -> bool {
 pub fn pointer_to(base: Option<&Arc<Type>>) -> Type {
     Type {
         kind: TypeKind::Ptr,
+        size: 8,
         base: base.cloned(),
         ..Default::default()
     }
@@ -52,6 +66,16 @@ pub fn func_type(return_ty: Arc<Type>) -> Type {
     Type {
         kind: TypeKind::Func,
         return_ty: Some(return_ty),
+        ..Default::default()
+    }
+}
+
+pub fn array_of(base: Arc<Type>, len: usize) -> Type {
+    Type {
+        kind: TypeKind::Array,
+        size: base.size * len,
+        base: Some(base),
+        array_len: Some(len),
         ..Default::default()
     }
 }
@@ -86,15 +110,22 @@ pub fn add_type(node: &mut Option<&mut Node>) -> Result<()> {
     }
 
     match &node.kind {
-        NodeKind::Add
-        | NodeKind::Sub
-        | NodeKind::Mul
-        | NodeKind::Div
-        | NodeKind::Neg
-        | NodeKind::Assign => {
+        NodeKind::Add | NodeKind::Sub | NodeKind::Mul | NodeKind::Div | NodeKind::Neg => {
             let Some(lhs) = &node.lhs else {
                 return Err(new_error_tok(&node.tok, "expected left-hand side"));
             };
+            node.ty = lhs.ty.clone();
+            Ok(())
+        }
+        NodeKind::Assign => {
+            let Some(lhs) = &node.lhs else {
+                return Err(new_error_tok(&node.tok, "expected left-hand side"));
+            };
+            if let Some(ty) = &lhs.ty {
+                if let TypeKind::Array = ty.kind {
+                    return Err(new_error_tok(&node.tok, "not an lvalue"));
+                }
+            }
             node.ty = lhs.ty.clone();
             Ok(())
         }
@@ -115,16 +146,22 @@ pub fn add_type(node: &mut Option<&mut Node>) -> Result<()> {
             let Some(lhs) = &node.lhs else {
                 return Err(new_error_tok(&node.tok, "expected left-hand side"));
             };
+            if let Some(ty) = &lhs.ty {
+                if let TypeKind::Array = ty.kind {
+                    node.ty = Some(pointer_to(ty.base.as_ref()).into());
+                    return Ok(());
+                }
+            }
             node.ty = Some(pointer_to(lhs.ty.as_ref()).into());
             Ok(())
         }
         NodeKind::Deref => {
             if let Some(lhs) = &node.lhs {
-                if let Some(ty) = lhs.ty.as_ref() {
-                    let TypeKind::Ptr = ty.kind else {
+                if let Some(ty) = &lhs.ty {
+                    let Some(ty) = &ty.base else {
                         return Err(new_error_tok(&node.tok, "invalid pointer dereference"));
                     };
-                    node.ty = ty.base.clone();
+                    node.ty = Some(ty.clone());
                     return Ok(());
                 }
             }

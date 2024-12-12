@@ -15,7 +15,7 @@
 use std::{cell::RefCell, iter::Peekable, rc::Rc, sync::Arc, vec::IntoIter};
 
 use crate::{
-    add_type, consume, func_type, is_integer, new_error_et, new_error_tok, pointer_to,
+    add_type, array_of, consume, func_type, is_integer, new_error_et, new_error_tok, pointer_to,
     tokenize::{equal, skip, Token, TokenKind},
     Type, TY_INT,
 };
@@ -167,35 +167,55 @@ fn get_ident(tok: &Token) -> Result<&'static str> {
     Ok(tok.lexeme)
 }
 
+fn get_number(tok: &Token) -> Result<isize> {
+    let TokenKind::Num(num) = tok.kind else {
+        return Err(new_error_tok(tok, "expected a number"));
+    };
+    Ok(num)
+}
+
 /// declspec = "int"
 fn declspec(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Arc<Type>> {
     skip(tokens, "int")?;
     Ok(TY_INT.clone())
 }
 
-// type-suffix = ("(" func-params)? ")")?
-// func-params = param ("," param)*
-// param = declspec declarator
+fn func_params(tokens: &mut Peekable<IntoIter<Token>>, ty: Arc<Type>) -> Result<Type> {
+    let mut params = Vec::new();
+    while let Some(tok) = tokens.peek() {
+        if equal(tok, ")") {
+            skip(tokens, ")")?;
+            break;
+        }
+        if !params.is_empty() {
+            skip(tokens, ",")?;
+        }
+        let basety = declspec(tokens)?;
+        let ty = declarator(tokens, &basety)?;
+        params.push(ty);
+    }
+    let mut ty = func_type(ty);
+    ty.params = Some(params);
+    Ok(ty)
+}
+
+// type-suffix = "(" func-params
+// | "[" num "]"
+// | ε
 fn type_suffix(tokens: &mut Peekable<IntoIter<Token>>, ty: Type) -> Result<Type> {
     if let Some(tok) = tokens.peek() {
         if equal(tok, "(") {
             tokens.next();
-            let mut types = Vec::new();
-            while let Some(tok) = tokens.peek() {
-                if equal(tok, ")") {
-                    break;
-                }
-                if !types.is_empty() {
-                    skip(tokens, ",")?;
-                }
-                let basety = declspec(tokens)?;
-                let ty = declarator(tokens, &basety)?;
-                types.push(ty);
-            }
-            skip(tokens, ")")?;
-            let mut ty = func_type(Arc::new(ty));
-            ty.params = Some(types);
-            return Ok(ty);
+            return func_params(tokens, Arc::new(ty));
+        }
+        if equal(tok, "[") {
+            tokens.next();
+            let Some(tok) = tokens.next() else {
+                return Err(new_error_et());
+            };
+            let num = get_number(&tok)?;
+            skip(tokens, "]")?;
+            return Ok(array_of(Arc::new(ty), num as usize));
         }
     }
     Ok(ty)
@@ -514,6 +534,14 @@ fn has_base_type(node: &Option<Node>) -> bool {
         .is_some_and(|node| node.ty.as_ref().is_some_and(|ty| ty.base.is_some()))
 }
 
+fn get_base_size(node: &Option<Node>) -> usize {
+    node.as_ref()
+        .and_then(|n| n.ty.as_ref())
+        .and_then(|t| t.base.as_ref())
+        .map(|b| b.size)
+        .unwrap_or(0)
+}
+
 /// In C, `+` operator is overloaded to perform the pointer arithmetic.
 /// If p is a pointer, p+n adds not n but sizeof(*p)*n to the value of p,
 /// so that p+n points to the location n elements (not bytes) ahead of p.
@@ -540,7 +568,7 @@ pub fn new_add(mut lhs: Option<Node>, mut rhs: Option<Node>, tok: Token) -> Resu
     rhs = Some(new_binary(
         NodeKind::Mul,
         rhs,
-        Some(new_num(8, tok.clone())),
+        Some(new_num(get_base_size(&lhs) as isize, tok.clone())),
         tok.clone(),
     ));
     Ok(new_binary(NodeKind::Add, lhs, rhs, tok))
@@ -561,7 +589,7 @@ pub fn new_sub(mut lhs: Option<Node>, mut rhs: Option<Node>, tok: Token) -> Resu
         let mut node = new_binary(
             NodeKind::Mul,
             rhs,
-            Some(new_num(8, tok.clone())),
+            Some(new_num(get_base_size(&lhs) as isize, tok.clone())),
             tok.clone(),
         );
         add_type(&mut Some(&mut node))?;
@@ -577,12 +605,13 @@ pub fn new_sub(mut lhs: Option<Node>, mut rhs: Option<Node>, tok: Token) -> Resu
 
     // ptr - ptr, which returns how many elements are between the two.
     if has_base_type(&lhs) && has_base_type(&rhs) {
+        let size = get_base_size(&lhs) as isize;
         let mut node = new_binary(NodeKind::Sub, lhs, rhs, tok.clone());
         node.ty = Some(TY_INT.clone());
         return Ok(new_binary(
             NodeKind::Div,
             Some(node),
-            Some(new_num(8, tok.clone())),
+            Some(new_num(size, tok.clone())),
             tok,
         ));
     }

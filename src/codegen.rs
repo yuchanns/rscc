@@ -1,7 +1,7 @@
 use std::{
     sync::{
         atomic::{AtomicIsize, Ordering::SeqCst},
-        OnceLock,
+        Arc, OnceLock,
     },
     vec::IntoIter,
 };
@@ -11,7 +11,7 @@ use anyhow::Result;
 use crate::{
     new_error_tok,
     parse::{Node, NodeKind},
-    Function,
+    Function, Type, TypeKind,
 };
 
 static GLOBAL_DEPTH: OnceLock<AtomicIsize> = OnceLock::new();
@@ -64,6 +64,28 @@ fn gen_addr(node: Option<&Node>) -> Result<()> {
     Ok(())
 }
 
+/// Load a value from where `x0` points to.
+fn load(ty: &Option<Arc<Type>>) {
+    let Some(ty) = ty else {
+        return;
+    };
+    if ty.kind == TypeKind::Array {
+        // If it is an array, do not attempt to load a value to the
+        // register because in genral we can't load an entire array to a
+        // register. As a result, the result of an evaluation of an array
+        // becomes not the array itself but the address of the array.
+        // This is where "array is automatically converted to a pointer to
+        // the first element of the array in C" occurs
+        return;
+    }
+    println!("  ldr x0, [x0]");
+}
+
+fn store() {
+    pop("x1");
+    println!("  str x0, [x1]");
+}
+
 fn gen_expr(node: Option<&Node>) -> Result<()> {
     let Some(node) = node else {
         return Ok(());
@@ -77,11 +99,11 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
         return Ok(());
     } else if let NodeKind::Var(_) = node.kind {
         gen_addr(Some(node))?;
-        println!("  ldr x0, [x0]");
+        load(&node.ty);
         return Ok(());
     } else if let NodeKind::Deref = node.kind {
         gen_expr(node.lhs.as_deref())?;
-        println!("  ldr x0, [x0]");
+        load(&node.ty);
         return Ok(());
     } else if let NodeKind::Addr = node.kind {
         gen_addr(node.lhs.as_deref())?;
@@ -90,8 +112,7 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
         gen_addr(node.lhs.as_deref())?;
         push();
         gen_expr(node.rhs.as_deref())?;
-        pop("x1");
-        println!("  str x0, [x1]");
+        store();
         return Ok(());
     } else if let NodeKind::FunCall(funcname) = node.kind {
         if let Some(args) = &node.args {
@@ -206,7 +227,9 @@ fn assign_lvar_offsets(prog: &mut IntoIter<Function>) {
     for f in prog.as_mut_slice() {
         let mut offset = 0;
         while let Some(var) = f.locals.pop() {
-            offset += 8;
+            if let Some(ty) = &var.as_ref().borrow().ty {
+                offset += ty.size as isize;
+            }
             var.as_ref().borrow_mut().offset = offset;
         }
         f.stack_size = align_to(offset, 16);

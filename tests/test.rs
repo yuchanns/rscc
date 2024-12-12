@@ -215,5 +215,22 @@ fn test_compiler() -> Result<()> {
         Some(55)
     );
 
+    assert_eq!(
+        run("int main() { int x[2]; int *y=&x; *y=3; return *x; }")?,
+        Some(3)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; *(x+1)=4; *(x+2)=5; return *x; }")?,
+        Some(3)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; *(x+1)=4; *(x+2)=5; return *(x+1); }")?,
+        Some(4)
+    );
+    assert_eq!(
+        run("int main() { int x[3]; *x=3; *(x+1)=4; *(x+2)=5; return *(x+2); }")?,
+        Some(5)
+    );
+
     Ok(())
 }
