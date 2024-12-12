@@ -200,7 +200,7 @@ fn func_params(tokens: &mut Peekable<IntoIter<Token>>, ty: Arc<Type>) -> Result<
 }
 
 // type-suffix = "(" func-params
-// | "[" num "]"
+// | "[" num "]" type-suffix
 // | ε
 fn type_suffix(tokens: &mut Peekable<IntoIter<Token>>, ty: Type) -> Result<Type> {
     if let Some(tok) = tokens.peek() {
@@ -215,6 +215,7 @@ fn type_suffix(tokens: &mut Peekable<IntoIter<Token>>, ty: Type) -> Result<Type>
             };
             let num = get_number(&tok)?;
             skip(tokens, "]")?;
+            let ty = type_suffix(tokens, ty)?;
             return Ok(array_of(Arc::new(ty), num as usize));
         }
     }
