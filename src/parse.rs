@@ -21,26 +21,28 @@ use crate::{
 };
 use anyhow::Result;
 
-#[derive(Debug, PartialEq, Clone)]
+/// Veriable or function
+#[derive(Debug, Default)]
 pub struct Obj {
     /// Variable name
     pub name: &'static str,
     // Type
     pub ty: Option<Arc<Type>>,
-    /// Offset from RBP
+    // local or global/function
+    pub is_local: bool,
+    /// Local variable
     pub offset: isize,
-}
+    /// Global variable or function
+    pub is_function: bool,
 
-#[derive(Debug)]
-pub struct Function {
-    pub name: &'static str,
+    /// Function
     pub params: Option<Vec<Rc<RefCell<Obj>>>>,
-    pub body: IntoIter<Node>,
+    pub body: Option<Node>,
     pub locals: Vec<Rc<RefCell<Obj>>>,
     pub stack_size: isize,
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Default)]
 pub enum NodeKind {
     /// +
     Add,
@@ -146,17 +148,35 @@ fn new_var_node(var: Rc<RefCell<Obj>>, tok: Token) -> Node {
     new_node(NodeKind::Var(var), tok)
 }
 
+fn new_var(name: &'static str, ty: Arc<Type>) -> Rc<RefCell<Obj>> {
+    Rc::new(RefCell::new(Obj {
+        name,
+        ty: Some(ty),
+        ..Default::default()
+    }))
+}
+
 fn new_lvar(
     name: &'static str,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
     ty: Arc<Type>,
 ) -> Rc<RefCell<Obj>> {
-    let obj = Rc::new(RefCell::new(Obj {
-        name,
-        offset: 0,
-        ty: Some(ty.clone()),
-    }));
-    locals.push(Rc::clone(&obj));
+    let obj = new_var(name, ty);
+    {
+        let mut var = obj.borrow_mut();
+        var.is_local = true;
+        locals.push(Rc::clone(&obj));
+    }
+    obj
+}
+
+fn new_gvar(
+    name: &'static str,
+    globals: &mut Vec<Rc<RefCell<Obj>>>,
+    ty: Arc<Type>,
+) -> Rc<RefCell<Obj>> {
+    let obj = new_var(name, ty);
+    globals.push(Rc::clone(&obj));
     obj
 }
 
@@ -809,9 +829,12 @@ fn create_param_lvars(params: &[Arc<Type>], locals: &mut Vec<Rc<RefCell<Obj>>>) 
     Ok(())
 }
 
-pub fn function(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
-    let ty = declspec(tokens)?;
-    let ty = declarator(tokens, &ty)?;
+pub fn function(
+    tokens: &mut Peekable<IntoIter<Token>>,
+    globals: &mut Vec<Rc<RefCell<Obj>>>,
+    basety: &Arc<Type>,
+) -> Result<()> {
+    let ty = declarator(tokens, basety)?;
     skip(tokens, "{")?;
     let Some(name) = &ty.name else {
         return Err(new_error_et());
@@ -820,25 +843,27 @@ pub fn function(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Function> {
     if let Some(params) = &ty.params {
         create_param_lvars(params, &mut locals)?;
     }
-    let params = &locals[0..locals.len()];
+    let params_len = locals.len();
+    let body = compound_stmt(tokens, &mut locals)?;
+    let f = new_gvar(get_ident(name)?, globals, ty);
+    let mut f = f.borrow_mut();
+    f.is_function = true;
+    f.params = Some(locals[0..params_len].to_vec());
+    f.body = Some(body);
+    f.locals = locals;
 
-    Ok(Function {
-        name: get_ident(name)?,
-        params: Some(params.to_vec()),
-        body: vec![compound_stmt(tokens, &mut locals)?].into_iter(),
-        locals,
-        stack_size: 0,
-    })
+    Ok(())
 }
 
-/// program = function-definition*
-pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<IntoIter<Function>> {
-    let mut functions = Vec::new();
+/// program = (function-definition | global-variable)*
+pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Vec<Obj>> {
+    let mut globals = Vec::new();
     while let Some(tok) = tokens.peek() {
         if tok.kind == TokenKind::Eof {
             break;
         }
-        functions.push(function(tokens)?);
+        let basety = declspec(tokens)?;
+        function(tokens, &mut globals, &basety)?;
     }
-    Ok(functions.into_iter())
+    Ok(globals.into_iter().map(|rc| rc.take()).collect::<Vec<_>>())
 }

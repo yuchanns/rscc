@@ -20,7 +20,8 @@ pub fn run() -> Result<()> {
         return Err(anyhow!("{name}: invalid number of arguments"));
     };
 
+    // Tokenize and parse.
     let mut tokens = tokenize(arg)?;
-    let mut prog = parse(&mut tokens)?;
-    codegen(&mut prog)
+    let prog = parse(&mut tokens)?;
+    codegen(prog)
 }

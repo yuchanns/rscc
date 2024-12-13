@@ -1,9 +1,6 @@
-use std::{
-    sync::{
-        atomic::{AtomicIsize, Ordering::SeqCst},
-        Arc, OnceLock,
-    },
-    vec::IntoIter,
+use std::sync::{
+    atomic::{AtomicIsize, Ordering::SeqCst},
+    Arc, OnceLock,
 };
 
 use anyhow::Result;
@@ -11,7 +8,7 @@ use anyhow::Result;
 use crate::{
     new_error_tok,
     parse::{Node, NodeKind},
-    Function, Type, TypeKind,
+    Obj, Type, TypeKind,
 };
 
 static GLOBAL_DEPTH: OnceLock<AtomicIsize> = OnceLock::new();
@@ -168,7 +165,7 @@ fn gen_expr(node: Option<&Node>) -> Result<()> {
     Ok(())
 }
 
-fn gen_stmt(node: &Node, current_f: &Function) -> Result<()> {
+fn gen_stmt(node: &Node, current_f: &Obj) -> Result<()> {
     match node.kind {
         NodeKind::If => {
             let c = current_count().fetch_add(1, SeqCst);
@@ -223,31 +220,39 @@ fn gen_stmt(node: &Node, current_f: &Function) -> Result<()> {
     }
 }
 
-fn assign_lvar_offsets(prog: &mut IntoIter<Function>) {
-    for f in prog.as_mut_slice() {
+fn assign_lvar_offsets(prog: &mut Vec<Obj>) {
+    for f in prog {
+        if !f.is_function {
+            continue;
+        }
         let mut offset = 0;
         while let Some(var) = f.locals.pop() {
             if let Some(ty) = &var.as_ref().borrow().ty {
                 offset += ty.size as isize;
             }
-            var.as_ref().borrow_mut().offset = offset;
+            var.borrow_mut().offset = offset;
         }
         f.stack_size = align_to(offset, 16);
     }
 }
 
-pub fn codegen(prog: &mut IntoIter<Function>) -> Result<()> {
-    assign_lvar_offsets(prog);
+pub fn codegen(mut prog: Vec<Obj>) -> Result<()> {
+    assign_lvar_offsets(&mut prog);
 
-    for f in prog.as_slice() {
+    for f in prog {
+        if !f.is_function {
+            continue;
+        }
         #[cfg(not(target_os = "macos"))]
         {
             println!("  .global {}", f.name);
+            println!("  .text");
             println!("{}:", f.name);
         }
         #[cfg(target_os = "macos")]
         {
             println!(".global _{}", f.name);
+            println!("  .text");
             println!("_{}:", f.name);
         }
         // Prologue
@@ -265,9 +270,9 @@ pub fn codegen(prog: &mut IntoIter<Function>) -> Result<()> {
             }
         }
 
-        for node in f.body.as_slice() {
+        if let Some(node) = &f.body {
             // Emit code
-            gen_stmt(node, f)?;
+            gen_stmt(node, &f)?;
             assert_eq!(current_depth().load(SeqCst), 0);
         }
 
