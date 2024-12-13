@@ -755,8 +755,7 @@ pub fn funcall(
     Ok(node)
 }
 
-/// primary = "(" expr ")" | ident args? | num
-/// args = "(" ")"
+/// primary = "(" expr ")" | "sizeof" unary | ident func-args? | num
 pub fn primary(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
@@ -769,6 +768,11 @@ pub fn primary(
         let node = expr(tokens, locals)?;
         skip(tokens, ")")?;
         return Ok(node);
+    } else if equal(tok, "sizeof") {
+        let tok = tokens.next().unwrap();
+        let mut node = unary(tokens, locals)?;
+        add_type(&mut node.as_mut())?;
+        return Ok(Some(new_num(node.unwrap().ty.unwrap().size as isize, tok)));
     } else if let TokenKind::Ident = tok.kind {
         let tok = tokens.next().unwrap();
         // Function call

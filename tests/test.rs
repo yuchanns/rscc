@@ -303,5 +303,39 @@ fn test_compiler() -> Result<()> {
         Some(5)
     );
 
+    assert_eq!(run("int main() { int x; return sizeof(x); }")?, Some(8));
+    assert_eq!(run("int main() { int x; return sizeof x; }")?, Some(8));
+    assert_eq!(run("int main() { int *x; return sizeof(x); }")?, Some(8));
+    assert_eq!(run("int main() { int x[4]; return sizeof(x); }")?, Some(32));
+    assert_eq!(
+        run("int main() { int x[3][4]; return sizeof(x); }")?,
+        Some(96)
+    );
+    assert_eq!(
+        run("int main() { int x[3][4]; return sizeof(*x); }")?,
+        Some(32)
+    );
+    assert_eq!(
+        run("int main() { int x[3][4]; return sizeof(**x); }")?,
+        Some(8)
+    );
+    assert_eq!(
+        run("int main() { int x[3][4]; return sizeof(**x) + 1; }")?,
+        Some(9)
+    );
+    assert_eq!(
+        run("int main() { int x[3][4]; return sizeof **x + 1; }")?,
+        Some(9)
+    );
+    assert_eq!(
+        run("int main() { int x[3][4]; return sizeof(**x + 1); }")?,
+        Some(8)
+    );
+    assert_eq!(run("int main() { int x=1; return sizeof(x=2); }")?, Some(8));
+    assert_eq!(
+        run("int main() { int x=1; sizeof(x=2); return x; }")?,
+        Some(1)
+    );
+
     Ok(())
 }
