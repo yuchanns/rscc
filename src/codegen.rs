@@ -1,6 +1,10 @@
-use std::sync::{
-    atomic::{AtomicIsize, Ordering::SeqCst},
-    Arc, OnceLock,
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicIsize, Ordering::SeqCst},
+        Arc, OnceLock,
+    },
 };
 
 use anyhow::Result;
@@ -50,7 +54,22 @@ fn gen_addr(node: Option<&Node>) -> Result<()> {
 
     match &node.kind {
         NodeKind::Var(obj) => {
-            println!("  sub x0, x29, #{}", obj.as_ref().borrow().offset);
+            let obj = obj.as_ref().borrow();
+            if obj.is_local {
+                println!("  sub x0, x29, #{}", obj.offset);
+            } else {
+                // Global variable
+                #[cfg(not(target_os = "macos"))]
+                {
+                    println!("  adrp x0, {}", obj.name);
+                    println!("  add x0, x0, :lo12:{}", obj.name);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    println!("  adrp x0, _{}@PAGE", obj.name);
+                    println!("  add x0, x0, _{}@PAGEOFF", obj.name);
+                }
+            }
         }
         NodeKind::Deref => {
             gen_expr(node.lhs.as_deref())?;
@@ -220,8 +239,9 @@ fn gen_stmt(node: &Node, current_f: &Obj) -> Result<()> {
     }
 }
 
-fn assign_lvar_offsets(prog: &mut Vec<Obj>) {
+fn assign_lvar_offsets(prog: &[Rc<RefCell<Obj>>]) {
     for f in prog {
+        let mut f = f.borrow_mut();
         if !f.is_function {
             continue;
         }
@@ -236,10 +256,33 @@ fn assign_lvar_offsets(prog: &mut Vec<Obj>) {
     }
 }
 
-pub fn codegen(mut prog: Vec<Obj>) -> Result<()> {
-    assign_lvar_offsets(&mut prog);
+fn emit_data(prog: &[Rc<RefCell<Obj>>]) {
+    for g in prog {
+        let g = g.borrow();
+        if g.is_function {
+            continue;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            println!("  .data");
+            println!("  .global {}", g.name);
+            println!("  .balign 8"); // Ensure 8-byte alignment
+            println!("{}:", g.name);
+            println!("  .zero {}", g.ty.clone().unwrap().size);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            println!(".data");
+            println!(".global _{}", g.name);
+            println!("_{}:", g.name);
+            println!("  .zero {}", g.ty.clone().unwrap().size);
+        }
+    }
+}
 
+fn emit_text(prog: &[Rc<RefCell<Obj>>]) -> Result<()> {
     for f in prog {
+        let f = f.borrow();
         if !f.is_function {
             continue;
         }
@@ -282,6 +325,13 @@ pub fn codegen(mut prog: Vec<Obj>) -> Result<()> {
         println!("  ldp x29, x30, [sp], #16");
         println!("  ret");
     }
+    Ok(())
+}
+
+pub fn codegen(prog: Vec<Rc<RefCell<Obj>>>) -> Result<()> {
+    assign_lvar_offsets(&prog);
+    emit_data(&prog);
+    emit_text(&prog)?;
 
     Ok(())
 }

@@ -337,5 +337,35 @@ fn test_compiler() -> Result<()> {
         Some(1)
     );
 
+    assert_eq!(run("int x; int main() { return x; }")?, Some(0));
+    assert_eq!(run("int x; int main() { x=3; return x; }")?, Some(3));
+    assert_eq!(
+        run("int x; int y; int main() { x=3; y=4; return x+y; }")?,
+        Some(7)
+    );
+    assert_eq!(
+        run("int x, y; int main() { x=3; y=4; return x+y; }")?,
+        Some(7)
+    );
+    assert_eq!(
+        run("int x[4]; int main() { x[0]=0; x[1]=1; x[2]=2; x[3]=3; return x[0]; }")?,
+        Some(0)
+    );
+    assert_eq!(
+        run("int x[4]; int main() { x[0]=0; x[1]=1; x[2]=2; x[3]=3; return x[1]; }")?,
+        Some(1)
+    );
+    assert_eq!(
+        run("int x[4]; int main() { x[0]=0; x[1]=1; x[2]=2; x[3]=3; return x[2]; }")?,
+        Some(2)
+    );
+    assert_eq!(
+        run("int x[4]; int main() { x[0]=0; x[1]=1; x[2]=2; x[3]=3; return x[3]; }")?,
+        Some(3)
+    );
+
+    assert_eq!(run("int x; int main() { return sizeof(x); }")?, Some(8));
+    assert_eq!(run("int x[4]; int main() { return sizeof(x); }")?, Some(32));
+
     Ok(())
 }

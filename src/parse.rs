@@ -17,7 +17,7 @@ use std::{cell::RefCell, iter::Peekable, rc::Rc, sync::Arc, vec::IntoIter};
 use crate::{
     add_type, array_of, consume, func_type, is_integer, new_error_et, new_error_tok, pointer_to,
     tokenize::{equal, skip, Token, TokenKind},
-    Type, TY_INT,
+    Type, TypeKind, TY_INT,
 };
 use anyhow::Result;
 
@@ -119,10 +119,15 @@ fn new_node(kind: NodeKind, tok: Token) -> Node {
     }
 }
 
-fn find_var(tok: &Token, locals: &[Rc<RefCell<Obj>>]) -> Option<Rc<RefCell<Obj>>> {
+fn find_var(
+    tok: &Token,
+    locals: &[Rc<RefCell<Obj>>],
+    globals: &[Rc<RefCell<Obj>>],
+) -> Option<Rc<RefCell<Obj>>> {
     let name = tok.lexeme;
     locals
         .iter()
+        .chain(globals.iter())
         .find(|obj| obj.as_ref().borrow().name == name)
         .map(Rc::clone)
 }
@@ -266,6 +271,7 @@ fn declarator(tokens: &mut Peekable<IntoIter<Token>>, ty: &Arc<Type>) -> Result<
 pub fn declaration(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Node> {
     let basety = declspec(tokens)?;
 
@@ -298,7 +304,7 @@ pub fn declaration(
 
         let lhs = Some(new_var_node(var, (**ntok).clone()));
         tokens.next();
-        let rhs = assign(tokens, locals)?;
+        let rhs = assign(tokens, locals, globals)?;
         let Some(tok) = tokens.peek() else {
             return Err(new_error_et());
         };
@@ -323,11 +329,12 @@ pub fn declaration(
 fn stmt(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Node> {
     if let Some(tok) = tokens.peek() {
         if equal(tok, "return") {
             let tok = tokens.next().unwrap();
-            let node = new_unary(NodeKind::Return, expr(tokens, locals)?, tok);
+            let node = new_unary(NodeKind::Return, expr(tokens, locals, globals)?, tok);
             skip(tokens, ";")?;
             return Ok(node);
         }
@@ -335,13 +342,13 @@ fn stmt(
         if equal(tok, "if") {
             let tok = tokens.next().unwrap();
             skip(tokens, "(")?;
-            let cond = expr(tokens, locals)?;
+            let cond = expr(tokens, locals, globals)?;
             skip(tokens, ")")?;
-            let then = Some(stmt(tokens, locals)?);
+            let then = Some(stmt(tokens, locals, globals)?);
             let els = if let Some(tok) = tokens.peek() {
                 if equal(tok, "else") {
                     tokens.next();
-                    Some(stmt(tokens, locals)?)
+                    Some(stmt(tokens, locals, globals)?)
                 } else {
                     None
                 }
@@ -358,14 +365,14 @@ fn stmt(
         if equal(tok, "for") {
             let tok = tokens.next().unwrap();
             skip(tokens, "(")?;
-            let init = expr_stmt(tokens, locals)?;
+            let init = expr_stmt(tokens, locals, globals)?;
             let Some(maby_cond) = tokens.peek() else {
                 return Err(new_error_et());
             };
             let cond = if equal(maby_cond, ";") {
                 None
             } else {
-                expr(tokens, locals)?
+                expr(tokens, locals, globals)?
             };
             skip(tokens, ";")?;
             let Some(maby_inc) = tokens.peek() else {
@@ -374,10 +381,10 @@ fn stmt(
             let inc = if equal(maby_inc, ")") {
                 None
             } else {
-                expr(tokens, locals)?
+                expr(tokens, locals, globals)?
             };
             skip(tokens, ")")?;
-            let then = stmt(tokens, locals)?;
+            let then = stmt(tokens, locals, globals)?;
 
             let mut node = new_node(NodeKind::For, tok);
             node.cond = cond.map(Box::new);
@@ -390,9 +397,9 @@ fn stmt(
         if equal(tok, "while") {
             let tok = tokens.next().unwrap();
             skip(tokens, "(")?;
-            let cond = expr(tokens, locals)?;
+            let cond = expr(tokens, locals, globals)?;
             skip(tokens, ")")?;
-            let then = stmt(tokens, locals)?;
+            let then = stmt(tokens, locals, globals)?;
 
             let mut node = new_node(NodeKind::For, tok);
             node.cond = cond.map(Box::new);
@@ -402,16 +409,17 @@ fn stmt(
 
         if equal(tok, "{") {
             tokens.next();
-            return compound_stmt(tokens, locals);
+            return compound_stmt(tokens, locals, globals);
         }
     }
-    expr_stmt(tokens, locals)
+    expr_stmt(tokens, locals, globals)
 }
 
 // compound-stmt = stmt * "}"
 fn compound_stmt(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Node> {
     let mut nodes = Vec::new();
     while let Some(tok) = tokens.peek() {
@@ -419,9 +427,9 @@ fn compound_stmt(
             break;
         }
         if equal(tok, "int") {
-            nodes.push(declaration(tokens, locals)?);
+            nodes.push(declaration(tokens, locals, globals)?);
         } else {
-            let mut node = stmt(tokens, locals)?;
+            let mut node = stmt(tokens, locals, globals)?;
             add_type(&mut Some(&mut node))?;
             nodes.push(node);
         }
@@ -437,6 +445,7 @@ fn compound_stmt(
 fn expr_stmt(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Node> {
     if let Some(tok) = tokens.peek() {
         if equal(tok, ";") {
@@ -446,7 +455,7 @@ fn expr_stmt(
         }
     }
     let tok = tokens.peek().unwrap().clone();
-    let node = new_unary(NodeKind::ExprStmt, expr(tokens, locals)?, tok);
+    let node = new_unary(NodeKind::ExprStmt, expr(tokens, locals, globals)?, tok);
     skip(tokens, ";")?;
     Ok(node)
 }
@@ -455,23 +464,25 @@ fn expr_stmt(
 pub fn expr(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    assign(tokens, locals)
+    assign(tokens, locals, globals)
 }
 
 /// assign = equality ("=" assign)?
 pub fn assign(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    let mut node = equality(tokens, locals)?;
+    let mut node = equality(tokens, locals, globals)?;
     if let Some(tok) = tokens.peek() {
         if equal(tok, "=") {
             let tok = tokens.next().unwrap();
             node = Some(new_binary(
                 NodeKind::Assign,
                 node,
-                assign(tokens, locals)?,
+                assign(tokens, locals, globals)?,
                 tok,
             ));
         }
@@ -483,15 +494,16 @@ pub fn assign(
 pub fn equality(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    let mut node = relational(tokens, locals)?;
+    let mut node = relational(tokens, locals, globals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "==") {
             let tok = tokens.next().unwrap();
             node = Some(new_binary(
                 NodeKind::Eq,
                 node,
-                relational(tokens, locals)?,
+                relational(tokens, locals, globals)?,
                 tok,
             ));
             continue;
@@ -501,7 +513,7 @@ pub fn equality(
             node = Some(new_binary(
                 NodeKind::Ne,
                 node,
-                relational(tokens, locals)?,
+                relational(tokens, locals, globals)?,
                 tok,
             ));
             continue;
@@ -516,27 +528,48 @@ pub fn equality(
 pub fn relational(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    let mut node = add(tokens, locals)?;
+    let mut node = add(tokens, locals, globals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "<") {
             let tok = tokens.next().unwrap();
-            node = Some(new_binary(NodeKind::Lt, node, add(tokens, locals)?, tok));
+            node = Some(new_binary(
+                NodeKind::Lt,
+                node,
+                add(tokens, locals, globals)?,
+                tok,
+            ));
             continue;
         }
         if equal(tok, "<=") {
             let tok = tokens.next().unwrap();
-            node = Some(new_binary(NodeKind::Le, node, add(tokens, locals)?, tok));
+            node = Some(new_binary(
+                NodeKind::Le,
+                node,
+                add(tokens, locals, globals)?,
+                tok,
+            ));
             continue;
         }
         if equal(tok, ">") {
             let tok = tokens.next().unwrap();
-            node = Some(new_binary(NodeKind::Lt, add(tokens, locals)?, node, tok));
+            node = Some(new_binary(
+                NodeKind::Lt,
+                add(tokens, locals, globals)?,
+                node,
+                tok,
+            ));
             continue;
         }
         if equal(tok, ">=") {
             let tok = tokens.next().unwrap();
-            node = Some(new_binary(NodeKind::Le, add(tokens, locals)?, node, tok));
+            node = Some(new_binary(
+                NodeKind::Le,
+                add(tokens, locals, globals)?,
+                node,
+                tok,
+            ));
             continue;
         }
         break;
@@ -643,17 +676,18 @@ pub fn new_sub(mut lhs: Option<Node>, mut rhs: Option<Node>, tok: Token) -> Resu
 pub fn add(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    let mut node = mul(tokens, locals)?;
+    let mut node = mul(tokens, locals, globals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "+") {
             let tok = tokens.next().unwrap();
-            node = Some(new_add(node, mul(tokens, locals)?, tok)?);
+            node = Some(new_add(node, mul(tokens, locals, globals)?, tok)?);
             continue;
         }
         if equal(tok, "-") {
             let tok = tokens.next().unwrap();
-            node = Some(new_sub(node, mul(tokens, locals)?, tok)?);
+            node = Some(new_sub(node, mul(tokens, locals, globals)?, tok)?);
             continue;
         }
         break;
@@ -666,15 +700,16 @@ pub fn add(
 pub fn mul(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    let mut node = unary(tokens, locals)?;
+    let mut node = unary(tokens, locals, globals)?;
     while let Some(tok) = tokens.peek() {
         if equal(tok, "*") {
             let tok = tokens.next().unwrap();
             node = Some(new_binary(
                 NodeKind::Mul,
                 node,
-                primary(tokens, locals)?,
+                primary(tokens, locals, globals)?,
                 tok,
             ));
             continue;
@@ -684,7 +719,7 @@ pub fn mul(
             node = Some(new_binary(
                 NodeKind::Div,
                 node,
-                primary(tokens, locals)?,
+                primary(tokens, locals, globals)?,
                 tok,
             ));
             continue;
@@ -700,45 +735,55 @@ pub fn mul(
 pub fn unary(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
     let Some(tok) = tokens.peek() else {
         return Ok(None);
     };
     if equal(tok, "+") {
         tokens.next();
-        return unary(tokens, locals);
+        return unary(tokens, locals, globals);
     }
     if equal(tok, "-") {
         let tok = tokens.next().unwrap();
-        return Ok(Some(new_unary(NodeKind::Neg, unary(tokens, locals)?, tok)));
+        return Ok(Some(new_unary(
+            NodeKind::Neg,
+            unary(tokens, locals, globals)?,
+            tok,
+        )));
     }
     if equal(tok, "&") {
         let tok = tokens.next().unwrap();
-        return Ok(Some(new_unary(NodeKind::Addr, unary(tokens, locals)?, tok)));
+        return Ok(Some(new_unary(
+            NodeKind::Addr,
+            unary(tokens, locals, globals)?,
+            tok,
+        )));
     }
     if equal(tok, "*") {
         let tok = tokens.next().unwrap();
         return Ok(Some(new_unary(
             NodeKind::Deref,
-            unary(tokens, locals)?,
+            unary(tokens, locals, globals)?,
             tok,
         )));
     }
-    postfix(tokens, locals)
+    postfix(tokens, locals, globals)
 }
 
 /// postfix = primary ("[" expr "]")*
 pub fn postfix(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
-    let mut node = primary(tokens, locals)?;
+    let mut node = primary(tokens, locals, globals)?;
     while let Some(tok) = tokens.peek() {
         if !equal(tok, "[") {
             break;
         }
         let start = tokens.next().unwrap();
-        let idx = expr(tokens, locals)?;
+        let idx = expr(tokens, locals, globals)?;
         skip(tokens, "]")?;
         node = Some(new_unary(
             NodeKind::Deref,
@@ -754,6 +799,7 @@ pub fn funcall(
     start: Token,
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Node> {
     tokens.next();
     let mut args = Vec::new();
@@ -766,7 +812,7 @@ pub fn funcall(
         if !args.is_empty() {
             skip(tokens, ",")?;
         }
-        if let Some(arg) = assign(tokens, locals)? {
+        if let Some(arg) = assign(tokens, locals, globals)? {
             args.push(arg);
         }
     }
@@ -779,18 +825,19 @@ pub fn funcall(
 pub fn primary(
     tokens: &mut Peekable<IntoIter<Token>>,
     locals: &mut Vec<Rc<RefCell<Obj>>>,
+    globals: &[Rc<RefCell<Obj>>],
 ) -> Result<Option<Node>> {
     let Some(tok) = tokens.peek() else {
         return Ok(None);
     };
     if equal(tok, "(") {
         tokens.next();
-        let node = expr(tokens, locals)?;
+        let node = expr(tokens, locals, globals)?;
         skip(tokens, ")")?;
         return Ok(node);
     } else if equal(tok, "sizeof") {
         let tok = tokens.next().unwrap();
-        let mut node = unary(tokens, locals)?;
+        let mut node = unary(tokens, locals, globals)?;
         add_type(&mut node.as_mut())?;
         return Ok(Some(new_num(node.unwrap().ty.unwrap().size as isize, tok)));
     } else if let TokenKind::Ident = tok.kind {
@@ -798,13 +845,11 @@ pub fn primary(
         // Function call
         if let Some(next) = tokens.peek() {
             if equal(next, "(") {
-                return Ok(Some(funcall(tok, tokens, locals)?));
+                return Ok(Some(funcall(tok, tokens, locals, globals)?));
             }
         }
         // Variable
-        let var = if let Some(var) = find_var(&tok, locals) {
-            var
-        } else {
+        let Some(var) = find_var(&tok, locals, globals) else {
             return Err(new_error_tok(&tok, "undefined variable"));
         };
         let node = new_var_node(var, tok);
@@ -844,7 +889,7 @@ pub fn function(
         create_param_lvars(params, &mut locals)?;
     }
     let params_len = locals.len();
-    let body = compound_stmt(tokens, &mut locals)?;
+    let body = compound_stmt(tokens, &mut locals, globals)?;
     let f = new_gvar(get_ident(name)?, globals, ty);
     let mut f = f.borrow_mut();
     f.is_function = true;
@@ -855,15 +900,58 @@ pub fn function(
     Ok(())
 }
 
+pub fn global_variable(
+    tokens: &mut Peekable<IntoIter<Token>>,
+    globals: &mut Vec<Rc<RefCell<Obj>>>,
+    basety: &Arc<Type>,
+) -> Result<()> {
+    let mut first = true;
+    while !consume(tokens, ";") {
+        if !first {
+            skip(tokens, ",")?;
+        }
+        first = false;
+        let ty = declarator(tokens, basety)?;
+        let Some(ntok) = &ty.name else {
+            return Err(new_error_et());
+        };
+        let name = get_ident(ntok)?;
+        new_gvar(name, globals, ty);
+    }
+    Ok(())
+}
+
+/// Lookahead tokens and returns true if a given token is a start
+/// of a function definition or declaration.
+pub fn is_function(tokens: &mut Peekable<IntoIter<Token>>) -> Result<bool> {
+    let Some(tok) = tokens.peek() else {
+        return Ok(false);
+    };
+    if equal(tok, ";") {
+        return Ok(false);
+    }
+    let dummy = Arc::new(Type::default());
+    let ty = declarator(tokens, &dummy)?;
+    Ok(ty.kind == TypeKind::Func)
+}
+
 /// program = (function-definition | global-variable)*
-pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Vec<Obj>> {
+pub fn parse(tokens: &mut Peekable<IntoIter<Token>>) -> Result<Vec<Rc<RefCell<Obj>>>> {
     let mut globals = Vec::new();
     while let Some(tok) = tokens.peek() {
         if tok.kind == TokenKind::Eof {
             break;
         }
         let basety = declspec(tokens)?;
-        function(tokens, &mut globals, &basety)?;
+
+        // Function
+        if is_function(&mut tokens.clone())? {
+            function(tokens, &mut globals, &basety)?;
+            continue;
+        }
+
+        // Global variable
+        global_variable(tokens, &mut globals, &basety)?;
     }
-    Ok(globals.into_iter().map(|rc| rc.take()).collect::<Vec<_>>())
+    Ok(globals)
 }
